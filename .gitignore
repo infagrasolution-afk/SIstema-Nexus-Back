@@ -1,0 +1,39 @@
+# Entornos virtuales
+venv/
+env/
+ENV/
+.env
+
+# Archivos de base de datos SQLite
+*.db
+*.sqlite3
+
+# Archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribuciones y empaquetado
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs y bases de datos varias
+*.log
+
+# Entornos de desarrollo locales
+.vscode/
+.idea/
+.DS_Store
