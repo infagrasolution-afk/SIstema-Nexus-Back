@@ -45,7 +45,8 @@ async def create_user(
         hashed_password=get_password_hash(user_in.password),
         is_active=user_in.is_active,
         is_superuser=user_in.is_superuser,
-        tenant_id=tenant_id
+        tenant_id=tenant_id,
+        modules=user_in.modules
     )
     db.add(new_user)
     await db.commit()

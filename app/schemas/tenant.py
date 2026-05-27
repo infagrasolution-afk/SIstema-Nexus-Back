@@ -10,6 +10,13 @@ class TenantBase(BaseModel):
     address: Optional[str] = None
     logo_url: Optional[str] = None
     parent_id: Optional[int] = None
+    modules: Optional[dict] = {"sales": {"is_active": True}, "inventory": {"is_active": True}, "accounting": {"is_active": True}}
+    admin_username: Optional[str] = None
+    admin_password: Optional[str] = None
+    primary_color: Optional[str] = "#2563eb"
+    secondary_color: Optional[str] = "#64748b"
+    settings: Optional[dict] = {}
+
 
 class TenantUpdate(TenantBase):
     name: Optional[str] = None

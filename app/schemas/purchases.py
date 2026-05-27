@@ -12,6 +12,7 @@ class PurchaseCreate(BaseModel):
     supplier_id: int
     warehouse_id: int
     reference: Optional[str] = None
+    payment_method: str = "cash"
     details: List[PurchaseDetailBase]
 
 class PurchaseDetailResponse(PurchaseDetailBase):
@@ -27,6 +28,7 @@ class PurchaseResponse(BaseModel):
     tax_total: float
     total: float
     reference: Optional[str] = None
+    payment_method: str
     created_at: datetime
     details: List[PurchaseDetailResponse]
     

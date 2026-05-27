@@ -7,6 +7,8 @@ class UserBase(BaseModel):
     email: Optional[EmailStr] = None
     is_active: Optional[bool] = True
     is_superuser: Optional[bool] = False
+    modules: Optional[str] = None
+
 
 class UserCreate(UserBase):
     password: str

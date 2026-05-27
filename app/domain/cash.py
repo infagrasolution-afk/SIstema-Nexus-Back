@@ -3,20 +3,20 @@ from sqlalchemy.orm import relationship
 import enum
 from datetime import datetime
 from app.core.database import Base
-from app.domain.base import TimestampMixin, TenantMixin
+from app.domain.base import TimestampMixin, TenantMixin, AuditMixin
 
 class SessionStatus(str, enum.Enum):
     OPEN = "open"
     CLOSED = "closed"
 
-class CashRegister(Base, TimestampMixin, TenantMixin):
+class CashRegister(Base, TimestampMixin, TenantMixin, AuditMixin):
     __tablename__ = "cash_registers"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False) # e.g., "Caja 1"
     computer_uid = Column(String, unique=True, index=True, nullable=True) # Unique ID for the physical computer
     is_active = Column(Integer, default=1)
 
-class CashSession(Base, TimestampMixin, TenantMixin):
+class CashSession(Base, TimestampMixin, TenantMixin, AuditMixin):
     __tablename__ = "cash_sessions"
     id = Column(Integer, primary_key=True, index=True)
     register_id = Column(Integer, ForeignKey('cash_registers.id'), nullable=False)

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, DateTime, ForeignKey, String
 from sqlalchemy.sql import func
 from sqlalchemy.orm import declared_attr
 
@@ -10,3 +10,9 @@ class TenantMixin:
     @declared_attr
     def tenant_id(cls):
         return Column(Integer, ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False, index=True)
+
+class AuditMixin:
+    created_by_id = Column(Integer, nullable=True)
+    created_by_name = Column(String, nullable=True)
+    updated_by_id = Column(Integer, nullable=True)
+    updated_by_name = Column(String, nullable=True)

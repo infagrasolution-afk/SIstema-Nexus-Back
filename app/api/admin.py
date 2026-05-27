@@ -68,7 +68,8 @@ async def create_tenant(
         tax_id=tenant_in.tax_id,
         license_key=license_key,
         subscription_end=sub_end,
-        is_active=True
+        is_active=True,
+        modules=tenant_in.modules or "sales,inventory,accounting"
     )
     db.add(new_tenant)
     await db.commit()
@@ -77,6 +78,20 @@ async def create_tenant(
     # AUTO-CREATE the tenant's private database file
     await init_tenant_db(new_tenant.id, new_tenant.name)
     
+    # AUTO-CREATE the tenant's first admin user if provided
+    if tenant_in.admin_username and tenant_in.admin_password:
+        new_user = User(
+            username=tenant_in.admin_username,
+            email=tenant_in.email, # Use company email as default
+            hashed_password=get_password_hash(tenant_in.admin_password),
+            tenant_id=new_tenant.id,
+            is_active=True,
+            is_superuser=False, # Tenant admin is NOT a global superuser
+            modules=new_tenant.modules
+        )
+        db.add(new_user)
+        await db.commit()
+
     # Send Welcome Email
     if new_tenant.email:
         await EmailService.send_welcome_license(
@@ -169,7 +184,8 @@ async def create_tenant_admin(
         email=user_in.email,
         hashed_password=get_password_hash(user_in.password),
         tenant_id=tenant_id,
-        is_superuser=user_in.is_superuser
+        is_superuser=user_in.is_superuser,
+        modules=user_in.modules
     )
     db.add(new_user)
     await db.commit()

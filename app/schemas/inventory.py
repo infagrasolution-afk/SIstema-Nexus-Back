@@ -38,6 +38,7 @@ class ProductBase(BaseModel):
     sku: str
     price: float
     cost: float = 0.0
+    average_cost: float = 0.0
     
     # WMS Fields
     track_batches: bool = False
@@ -52,6 +53,7 @@ class ProductCreate(ProductBase):
 class ProductResponse(ProductBase):
     id: int
     tenant_id: int
+    stock: float = 0.0
     model_config = ConfigDict(from_attributes=True)
 
 # --- Warehouses ---
@@ -67,4 +69,57 @@ class WarehouseResponse(WarehouseBase):
     id: int
     tenant_id: int
     bins: List[BinLocationResponse] = []
+    model_config = ConfigDict(from_attributes=True)
+
+# --- Movements & Adjustments ---
+class StockAdjustmentBase(BaseModel):
+    product_id: int
+    warehouse_id: int
+    bin_location_id: Optional[int] = None
+    batch_id: Optional[int] = None
+    quantity: float
+    reference: Optional[str] = "Manual Adjustment"
+    unit_cost: Optional[float] = None # For calculating average cost if it's an IN adjustment
+
+class StockAdjustmentCreate(StockAdjustmentBase):
+    pass
+
+class StockChargeCreate(BaseModel):
+    product_id: int
+    warehouse_id: int
+    bin_location_id: Optional[int] = None
+    batch_id: Optional[int] = None
+    quantity: float
+    reference: Optional[str] = None
+    document_number: Optional[str] = None
+    notes: Optional[str] = None
+    unit_cost: Optional[float] = None
+
+class StockDischargeCreate(BaseModel):
+    product_id: int
+    warehouse_id: int
+    bin_location_id: Optional[int] = None
+    batch_id: Optional[int] = None
+    quantity: float
+    reference: Optional[str] = None
+    document_number: Optional[str] = None
+    notes: Optional[str] = None
+    reason: Optional[str] = None
+
+class StockMovementResponse(BaseModel):
+    id: int
+    product_id: int
+    warehouse_id: int
+    movement_type: str
+    movement_subtype: Optional[str] = None
+    quantity: float
+    reference: Optional[str] = None
+    document_number: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    
+    # Optional nested info
+    product: Optional[ProductResponse] = None
+    warehouse: Optional[WarehouseResponse] = None
+    
     model_config = ConfigDict(from_attributes=True)

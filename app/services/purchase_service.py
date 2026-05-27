@@ -1,8 +1,10 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.domain.purchases import Purchase, PurchaseDetail, PurchaseStatus
-from app.domain.inventory import StockMovement, MovementType, Product
+from app.domain.inventory import MovementType, Product
+from app.services.wms_service import WMSService
 from app.schemas.purchases import PurchaseCreate
+from app.services.treasury_service import TreasuryService
 
 class PurchaseService:
     @staticmethod
@@ -39,8 +41,9 @@ class PurchaseService:
             if product:
                 product.cost = detail.cost_price
             
-            # Inventory entry
-            movement = StockMovement(
+            # Inventory entry via WMS
+            await WMSService.register_movement(
+                db=db,
                 product_id=detail.product_id,
                 warehouse_id=purchase_in.warehouse_id,
                 movement_type=MovementType.IN,
@@ -48,12 +51,16 @@ class PurchaseService:
                 reference=f"Purchase #{new_purchase.id} / Ref: {purchase_in.reference}",
                 tenant_id=tenant_id
             )
-            db.add(movement)
             
         new_purchase.subtotal = subtotal
         new_purchase.tax_total = subtotal * 0.16 # Mocked tax
-        new_purchase.total = subtotal + new_purchase.tax_total
+        new_sale_total = subtotal + new_purchase.tax_total
+        new_purchase.total = new_sale_total
         
+        # CxP Integration
+        if purchase_in.payment_method == "credit":
+            await TreasuryService.create_ap(db, new_purchase.id, new_purchase.supplier_id, new_sale_total, tenant_id)
+            
         await db.commit()
         await db.refresh(new_purchase)
         await db.refresh(new_purchase, ["details"])

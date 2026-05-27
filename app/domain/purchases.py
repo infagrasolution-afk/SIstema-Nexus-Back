@@ -1,15 +1,15 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Text, Enum
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Text, Enum, Boolean
 from sqlalchemy.orm import relationship
 import enum
 from app.core.database import Base
-from app.domain.base import TimestampMixin, TenantMixin
+from app.domain.base import TimestampMixin, TenantMixin, AuditMixin
 
 class PurchaseStatus(str, enum.Enum):
     DRAFT = "DRAFT"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
 
-class Supplier(Base, TimestampMixin, TenantMixin):
+class Supplier(Base, TimestampMixin, TenantMixin, AuditMixin):
     __tablename__ = "suppliers"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True, nullable=False)
@@ -20,7 +20,7 @@ class Supplier(Base, TimestampMixin, TenantMixin):
     
     purchases = relationship("Purchase", back_populates="supplier")
 
-class Purchase(Base, TimestampMixin, TenantMixin):
+class Purchase(Base, TimestampMixin, TenantMixin, AuditMixin):
     __tablename__ = "purchases"
     id = Column(Integer, primary_key=True, index=True)
     supplier_id = Column(Integer, ForeignKey('suppliers.id'), nullable=False)
@@ -29,11 +29,13 @@ class Purchase(Base, TimestampMixin, TenantMixin):
     tax_total = Column(Float, nullable=False, default=0.0)
     total = Column(Float, nullable=False, default=0.0)
     reference = Column(String) # Invoice number from supplier
+    payment_method = Column(String, default="cash")
+    is_accounted = Column(Boolean, default=False)
     
     supplier = relationship("Supplier", back_populates="purchases")
     details = relationship("PurchaseDetail", back_populates="purchase")
 
-class PurchaseDetail(Base, TimestampMixin, TenantMixin):
+class PurchaseDetail(Base, TimestampMixin, TenantMixin, AuditMixin):
     __tablename__ = "purchase_details"
     id = Column(Integer, primary_key=True, index=True)
     purchase_id = Column(Integer, ForeignKey('purchases.id'), nullable=False)

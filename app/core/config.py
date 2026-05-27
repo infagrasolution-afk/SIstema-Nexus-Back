@@ -5,16 +5,15 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
     
-    # Postgres
-    POSTGRES_SERVER: str = "localhost"
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"
-    POSTGRES_DB: str = "erp_db"
-    POSTGRES_PORT: str = "5432"
+    # Postgres Connection String from Render
+    DATABASE_URL: str = "postgresql://admin:nkj2VovKl0DDJgBZ1NonhTS6uLXxj5nu@dpg-d8b2pmcm0tmc73d5d6pg-a/erp_db_x91k"
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
-        return "sqlite+aiosqlite:///./erp.db"
+        # asyncpg requires the scheme to be postgresql+asyncpg
+        if self.DATABASE_URL.startswith("postgresql://"):
+            return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return self.DATABASE_URL
 
     # JWT
     SECRET_KEY: str = "supersecretkey_change_me_in_production"
