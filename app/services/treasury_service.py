@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from app.domain.treasury import AccountsReceivable, AccountsPayable, TreasuryPayment, DebtStatus
 from app.schemas.treasury import TreasuryPaymentCreate
 from app.services.accounting_service import AccountingService
+from app.services.movement_logger import MovementLogger
 
 class TreasuryService:
     @staticmethod
@@ -37,22 +38,36 @@ class TreasuryService:
         return ap
 
     @staticmethod
-    async def process_payment(db: AsyncSession, payment_in: TreasuryPaymentCreate, tenant_id: int):
+    async def process_payment(
+        db: AsyncSession,
+        payment_in: TreasuryPaymentCreate,
+        tenant_id: int,
+        user_id: int = None,
+        user_name: str = None
+    ):
         # 1. Register Payment
         new_payment = TreasuryPayment(
             **payment_in.model_dump(),
             tenant_id=tenant_id
         )
         db.add(new_payment)
-        
+
         # 2. Update Debt Balance
+        counterpart_name = "Desconocido"
+        operation = "PAYMENT_AR"
         if payment_in.ar_id:
-            result = await db.execute(select(AccountsReceivable).where(AccountsReceivable.id == payment_in.ar_id))
+            result = await db.execute(
+                select(AccountsReceivable).where(AccountsReceivable.id == payment_in.ar_id)
+            )
             debt = result.scalars().first()
+            operation = "PAYMENT_AR"
         else:
-            result = await db.execute(select(AccountsPayable).where(AccountsPayable.id == payment_in.ap_id))
+            result = await db.execute(
+                select(AccountsPayable).where(AccountsPayable.id == payment_in.ap_id)
+            )
             debt = result.scalars().first()
-            
+            operation = "PAYMENT_AP"
+
         if debt:
             debt.remaining_amount -= payment_in.amount
             if debt.remaining_amount <= 0:
@@ -60,9 +75,22 @@ class TreasuryService:
                 debt.remaining_amount = 0
             else:
                 debt.status = DebtStatus.PARTIAL
-        
+
         await db.flush()
         await AccountingService.account_treasury_payment(db, new_payment.id, tenant_id)
-        
+
+        # 3. Log payment
+        await MovementLogger.log_payment(
+            db=db,
+            tenant_id=tenant_id,
+            payment_id=new_payment.id,
+            operation=operation,
+            counterpart_name=counterpart_name,
+            amount=payment_in.amount,
+            payment_method=payment_in.payment_method,
+            user_id=user_id,
+            user_name=user_name,
+        )
+
         await db.commit()
         return new_payment

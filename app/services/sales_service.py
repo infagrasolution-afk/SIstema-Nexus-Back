@@ -1,16 +1,25 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.domain.sales import Sale, SaleDetail, Budget, BudgetItem
-from app.domain.inventory import MovementType
+from sqlalchemy import select
+from app.domain.sales import Sale, SaleDetail, Budget, BudgetItem, Customer
+from app.domain.inventory import MovementType, MovementSubtype
 from app.services.wms_service import WMSService
 from app.schemas.sales import SaleCreate, BudgetCreate, CustomerCreate
 from app.services.treasury_service import TreasuryService
-from sqlalchemy import select
+from app.services.movement_logger import MovementLogger
+
 
 class SalesService:
     @staticmethod
-    async def find_or_create_customer(db: AsyncSession, customer_in: CustomerCreate, tenant_id: int, user_id: int, user_name: str):
-        from app.domain.sales import Customer
-        result = await db.execute(select(Customer).where(Customer.tax_id == customer_in.tax_id, Customer.tenant_id == tenant_id))
+    async def find_or_create_customer(
+        db: AsyncSession,
+        customer_in: CustomerCreate,
+        tenant_id: int,
+        user_id: int,
+        user_name: str
+    ):
+        result = await db.execute(
+            select(Customer).where(Customer.tax_id == customer_in.tax_id, Customer.tenant_id == tenant_id)
+        )
         customer = result.scalars().first()
         if not customer:
             customer = Customer(
@@ -28,10 +37,21 @@ class SalesService:
         return customer
 
     @staticmethod
-    async def create_sale(db: AsyncSession, sale_in: SaleCreate, tenant_id: int, user_id: int, user_name: str) -> Sale:
+    async def create_sale(
+        db: AsyncSession,
+        sale_in: SaleCreate,
+        tenant_id: int,
+        user_id: int,
+        user_name: str
+    ) -> Sale:
         subtotal = 0.0
         tax_total = 0.0
-        
+
+        # Fetch customer name for logging
+        cust_result = await db.execute(select(Customer).where(Customer.id == sale_in.customer_id))
+        customer = cust_result.scalars().first()
+        customer_name = customer.name if customer else f"Cliente #{sale_in.customer_id}"
+
         new_sale = Sale(
             customer_id=sale_in.customer_id,
             payment_method=sale_in.payment_method,
@@ -45,16 +65,14 @@ class SalesService:
             created_by_name=user_name
         )
         db.add(new_sale)
-        await db.flush() 
-        
+        await db.flush()
+
         for detail in sale_in.details:
             detail_subtotal = detail.quantity * detail.unit_price
             subtotal += detail_subtotal
-            
-            # Logic for taxes (currently mocked at 16%, could be fetched from DB)
-            detail_tax = detail_subtotal * 0.16 
+            detail_tax = detail_subtotal * 0.16
             tax_total += detail_tax
-            
+
             new_detail = SaleDetail(
                 sale_id=new_sale.id,
                 product_id=detail.product_id,
@@ -67,7 +85,7 @@ class SalesService:
                 created_by_name=user_name
             )
             db.add(new_detail)
-            
+
             # Inventory deduction via WMS ONLY if not ON_HOLD
             if sale_in.status != "ON_HOLD":
                 await WMSService.register_movement(
@@ -75,31 +93,53 @@ class SalesService:
                     product_id=detail.product_id,
                     warehouse_id=sale_in.warehouse_id,
                     movement_type=MovementType.OUT,
+                    movement_subtype=MovementSubtype.SALE,   # ← trazabilidad correcta
                     quantity=detail.quantity,
-                    reference=f"Sale #{new_sale.id}",
-                    tenant_id=tenant_id
+                    reference=f"Venta #{new_sale.id:06d}",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    user_name=user_name,
                 )
-            
+
         new_sale.subtotal = subtotal
         new_sale.tax_total = tax_total
         new_sale.total = subtotal + tax_total
-        
+
         # CxC Integration ONLY if not ON_HOLD
         if new_sale.status != "ON_HOLD" and new_sale.payment_method == "credit":
             await TreasuryService.create_ar(db, new_sale.id, new_sale.customer_id, new_sale.total, tenant_id)
-            
+
+        # ── Log principal de la venta ──────────────────────────────────────────
+        if new_sale.status != "ON_HOLD":
+            await MovementLogger.log_sale(
+                db=db,
+                tenant_id=tenant_id,
+                sale_id=new_sale.id,
+                customer_name=customer_name,
+                total=new_sale.total,
+                currency=sale_in.currency or "VES",
+                payment_method=sale_in.payment_method,
+                user_id=user_id,
+                user_name=user_name,
+                status="COMPLETED",
+            )
+
         await db.commit()
         await db.refresh(new_sale)
-        
-        # Load details for response
         await db.refresh(new_sale, ["details"])
         return new_sale
 
     @staticmethod
-    async def create_budget(db: AsyncSession, budget_in: BudgetCreate, tenant_id: int, user_id: int, user_name: str) -> Budget:
+    async def create_budget(
+        db: AsyncSession,
+        budget_in: BudgetCreate,
+        tenant_id: int,
+        user_id: int,
+        user_name: str
+    ) -> Budget:
         subtotal = 0.0
         tax_total = 0.0
-        
+
         new_budget = Budget(
             customer_id=budget_in.customer_id,
             currency=budget_in.currency,
@@ -110,16 +150,14 @@ class SalesService:
             created_by_name=user_name
         )
         db.add(new_budget)
-        await db.flush() 
-        
+        await db.flush()
+
         for item in budget_in.items:
             item_subtotal = item.quantity * item.unit_price
             subtotal += item_subtotal
-            
-            # Logic for taxes
-            item_tax = item_subtotal * 0.16 
+            item_tax = item_subtotal * 0.16
             tax_total += item_tax
-            
+
             new_item = BudgetItem(
                 budget_id=new_budget.id,
                 product_id=item.product_id,
@@ -131,11 +169,11 @@ class SalesService:
                 created_by_name=user_name
             )
             db.add(new_item)
-            
+
         new_budget.subtotal = subtotal
         new_budget.tax_total = tax_total
         new_budget.total = subtotal + tax_total
-        
+
         await db.commit()
         await db.refresh(new_budget)
         await db.refresh(new_budget, ["items"])

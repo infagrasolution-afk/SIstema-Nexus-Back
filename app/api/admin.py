@@ -191,3 +191,64 @@ async def create_tenant_admin(
     await db.commit()
     await db.refresh(new_user)
     return new_user
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /users/{user_id}/unlock  — SOPORTE TÉCNICO (MONETIZADO POR WHATSAPP)
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/users/{user_id}/unlock", response_model=UserResponse)
+async def superadmin_unlock_and_reset(
+    user_id: int,
+    db: AsyncSession = Depends(get_master_db),
+    admin: User = Depends(check_admin)
+):
+    """
+    Soporte Técnico (Monetizado): Desbloquea una cuenta de administrador de empresa.
+    Tras recibir pago o soporte telefónico/WhatsApp, el dueño del software utiliza
+    este endpoint para rehabilitar la cuenta de administrador.
+    """
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    user.is_locked = False
+    user.login_attempts = 0
+    user.locked_at = None
+    user.updated_by_id = admin.id
+    user.updated_by_name = admin.username
+
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /users/{user_id}/reset-password-force  — Restablecer clave por superadmin
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/users/{user_id}/reset-password-force", response_model=UserResponse)
+async def superadmin_reset_password_force(
+    user_id: int,
+    new_password: str,
+    db: AsyncSession = Depends(get_master_db),
+    admin: User = Depends(check_admin)
+):
+    """
+    Soporte Técnico (Monetizado): Asigna una nueva contraseña temporal a un administrador.
+    """
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    user.hashed_password = get_password_hash(new_password)
+    user.is_locked = False
+    user.login_attempts = 0
+    user.locked_at = None
+    user.updated_by_id = admin.id
+    user.updated_by_name = admin.username
+
+    await db.commit()
+    await db.refresh(user)
+    return user
+

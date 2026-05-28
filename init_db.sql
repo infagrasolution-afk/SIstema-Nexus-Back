@@ -16,12 +16,12 @@ CREATE TABLE tenants (
 	logo_url VARCHAR, 
 	primary_color VARCHAR, 
 	secondary_color VARCHAR, 
-	settings JSON, 
+	settings JSONB DEFAULT '{}'::jsonb,
 	license_key VARCHAR, 
 	subscription_end TIMESTAMP WITH TIME ZONE, 
 	parent_id INTEGER, 
 	is_active BOOLEAN, 
-	modules JSON, 
+	modules JSONB DEFAULT '{}'::jsonb, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(), 
 	updated_at TIMESTAMP WITH TIME ZONE, 
 	created_by_id INTEGER, 
@@ -266,10 +266,14 @@ CREATE TABLE users (
 	username VARCHAR NOT NULL, 
 	email VARCHAR, 
 	hashed_password VARCHAR NOT NULL, 
-	is_active BOOLEAN, 
-	is_superuser BOOLEAN, 
+	is_active BOOLEAN DEFAULT TRUE, 
+	is_superuser BOOLEAN DEFAULT FALSE, 
 	modules VARCHAR, 
-	role_id INTEGER, 
+	role_id INTEGER,
+	-- Seguridad: bloqueo por intentos fallidos
+	login_attempts INTEGER NOT NULL DEFAULT 0,
+	is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+	locked_at TIMESTAMP WITH TIME ZONE,
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(), 
 	updated_at TIMESTAMP WITH TIME ZONE, 
 	tenant_id INTEGER NOT NULL, 
@@ -287,6 +291,7 @@ CREATE UNIQUE INDEX ix_users_email ON users (email);
 CREATE INDEX ix_users_tenant_id ON users (tenant_id);
 CREATE UNIQUE INDEX ix_users_username ON users (username);
 CREATE INDEX ix_users_id ON users (id);
+CREATE INDEX ix_users_is_locked ON users (is_locked);
 
 CREATE TABLE bin_locations (
 	id SERIAL NOT NULL, 
@@ -838,6 +843,88 @@ CREATE TABLE accounts_receivable (
 CREATE INDEX ix_accounts_receivable_tenant_id ON accounts_receivable (tenant_id);
 CREATE INDEX ix_accounts_receivable_id ON accounts_receivable (id);
 
+-- ============================================================
+-- TABLA: accounts_payable (BUG-07: faltaba en el script original)
+-- ============================================================
+CREATE TABLE accounts_payable (
+	id SERIAL NOT NULL,
+	purchase_id INTEGER NOT NULL,
+	supplier_id INTEGER NOT NULL,
+	total_amount FLOAT NOT NULL,
+	remaining_amount FLOAT NOT NULL,
+	due_date TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	status debtstatus,
+	notes VARCHAR,
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+	updated_at TIMESTAMP WITH TIME ZONE,
+	tenant_id INTEGER NOT NULL,
+	created_by_id INTEGER,
+	created_by_name VARCHAR,
+	updated_by_id INTEGER,
+	updated_by_name VARCHAR,
+	PRIMARY KEY (id),
+	FOREIGN KEY(purchase_id) REFERENCES purchases (id),
+	FOREIGN KEY(supplier_id) REFERENCES suppliers (id),
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+)
+
+;
+CREATE INDEX ix_accounts_payable_tenant_id ON accounts_payable (tenant_id);
+CREATE INDEX ix_accounts_payable_id ON accounts_payable (id);
+
+-- ============================================================
+-- TABLA: dispatch_notes (BUG-08: faltaba en el script original)
+-- ============================================================
+CREATE TABLE dispatch_notes (
+	id SERIAL NOT NULL,
+	source_warehouse_id INTEGER NOT NULL,
+	destination_warehouse_id INTEGER NOT NULL,
+	status VARCHAR DEFAULT 'PENDING',
+	reference VARCHAR,
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+	updated_at TIMESTAMP WITH TIME ZONE,
+	tenant_id INTEGER NOT NULL,
+	created_by_id INTEGER,
+	created_by_name VARCHAR,
+	updated_by_id INTEGER,
+	updated_by_name VARCHAR,
+	PRIMARY KEY (id),
+	FOREIGN KEY(source_warehouse_id) REFERENCES warehouses (id),
+	FOREIGN KEY(destination_warehouse_id) REFERENCES warehouses (id),
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+)
+
+;
+CREATE INDEX ix_dispatch_notes_id ON dispatch_notes (id);
+CREATE INDEX ix_dispatch_notes_tenant_id ON dispatch_notes (tenant_id);
+
+-- ============================================================
+-- TABLA: dispatch_note_items (BUG-08: faltaba en el script original)
+-- ============================================================
+CREATE TABLE dispatch_note_items (
+	id SERIAL NOT NULL,
+	dispatch_note_id INTEGER NOT NULL,
+	product_id INTEGER NOT NULL,
+	quantity FLOAT NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+	updated_at TIMESTAMP WITH TIME ZONE,
+	tenant_id INTEGER NOT NULL,
+	created_by_id INTEGER,
+	created_by_name VARCHAR,
+	updated_by_id INTEGER,
+	updated_by_name VARCHAR,
+	PRIMARY KEY (id),
+	FOREIGN KEY(dispatch_note_id) REFERENCES dispatch_notes (id) ON DELETE CASCADE,
+	FOREIGN KEY(product_id) REFERENCES products (id),
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+)
+
+;
+CREATE INDEX ix_dispatch_note_items_id ON dispatch_note_items (id);
+CREATE INDEX ix_dispatch_note_items_tenant_id ON dispatch_note_items (tenant_id);
+
+
+
 CREATE TABLE delivery_note_items (
 	id SERIAL NOT NULL, 
 	delivery_note_id INTEGER NOT NULL, 
@@ -884,3 +971,85 @@ CREATE TABLE treasury_payments (
 ;
 CREATE INDEX ix_treasury_payments_tenant_id ON treasury_payments (tenant_id);
 CREATE INDEX ix_treasury_payments_id ON treasury_payments (id);
+
+-- ============================================================
+-- TABLA: stock_movements
+-- Historial de movimientos de inventario (WMS)
+-- ============================================================
+CREATE TABLE stock_movements (
+	id SERIAL NOT NULL,
+	product_id INTEGER NOT NULL,
+	warehouse_id INTEGER NOT NULL,
+	bin_location_id INTEGER,
+	batch_id INTEGER,
+	movement_type VARCHAR NOT NULL,
+	movement_subtype VARCHAR,
+	quantity FLOAT NOT NULL,
+	reference VARCHAR,
+	document_number VARCHAR,
+	notes TEXT,
+	user_id INTEGER,
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+	updated_at TIMESTAMP WITH TIME ZONE,
+	tenant_id INTEGER NOT NULL,
+	created_by_id INTEGER,
+	created_by_name VARCHAR,
+	updated_by_id INTEGER,
+	updated_by_name VARCHAR,
+	PRIMARY KEY (id),
+	FOREIGN KEY(product_id) REFERENCES products (id),
+	FOREIGN KEY(warehouse_id) REFERENCES warehouses (id),
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+)
+
+;
+CREATE INDEX ix_stock_movements_id ON stock_movements (id);
+CREATE INDEX ix_stock_movements_tenant_id ON stock_movements (tenant_id);
+CREATE INDEX ix_stock_movements_product_id ON stock_movements (product_id);
+CREATE INDEX ix_stock_movements_warehouse_id ON stock_movements (warehouse_id);
+CREATE INDEX ix_stock_movements_movement_type ON stock_movements (movement_type);
+CREATE INDEX ix_stock_movements_movement_subtype ON stock_movements (movement_subtype);
+CREATE INDEX ix_stock_movements_created_at ON stock_movements (created_at);
+
+-- ============================================================
+-- TABLA: system_movements
+-- Bitácora universal de TODOS los movimientos del ERP:
+-- Cargos, Descargos, Ajustes, Ventas, Compras, Pagos, Asientos
+-- ============================================================
+CREATE TABLE system_movements (
+	id SERIAL NOT NULL,
+	tenant_id INTEGER NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+	user_id INTEGER,
+	user_name VARCHAR,
+	module VARCHAR NOT NULL,
+	operation VARCHAR NOT NULL,
+	reference_id INTEGER,
+	reference_type VARCHAR,
+	reference_code VARCHAR,
+	product_id INTEGER,
+	product_name VARCHAR,
+	product_sku VARCHAR,
+	warehouse_id INTEGER,
+	warehouse_name VARCHAR,
+	quantity FLOAT,
+	unit VARCHAR,
+	amount FLOAT,
+	unit_cost FLOAT,
+	currency VARCHAR DEFAULT 'VES',
+	description TEXT NOT NULL,
+	notes TEXT,
+	status VARCHAR,
+	PRIMARY KEY (id),
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+)
+
+;
+CREATE INDEX ix_system_movements_id ON system_movements (id);
+CREATE INDEX ix_system_movements_tenant_id ON system_movements (tenant_id);
+CREATE INDEX ix_system_movements_module ON system_movements (module);
+CREATE INDEX ix_system_movements_operation ON system_movements (operation);
+CREATE INDEX ix_system_movements_created_at ON system_movements (created_at);
+CREATE INDEX ix_system_movements_product_id ON system_movements (product_id);
+CREATE INDEX ix_system_movements_user_id ON system_movements (user_id);
+

@@ -8,3 +8,4 @@ from app.domain.refresh_token import RefreshToken
 from app.domain.accounting import Account, JournalEntry, JournalEntryDetail, DebitNote
 from app.domain.treasury import AccountsReceivable, AccountsPayable, TreasuryPayment
 from app.domain.rbac import Role, Permission, RolePermission
+from app.domain.system_movement import SystemMovement

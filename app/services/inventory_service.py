@@ -18,13 +18,15 @@ class InventoryService:
     ):
         # 1. Deduct from source
         await WMSService.register_movement(
-            db, product_id, from_warehouse_id, quantity, MovementType.OUT, 
+            db, product_id, from_warehouse_id, quantity, MovementType.OUT,
+            movement_subtype=MovementSubtype.TRANSFER,
             reference=f"Transfer to Warehouse #{to_warehouse_id}", tenant_id=tenant_id
         )
         
         # 2. Add to destination
         await WMSService.register_movement(
-            db, product_id, to_warehouse_id, quantity, MovementType.IN, 
+            db, product_id, to_warehouse_id, quantity, MovementType.IN,
+            movement_subtype=MovementSubtype.TRANSFER,
             reference=f"Transfer from Warehouse #{from_warehouse_id}", tenant_id=tenant_id
         )
         

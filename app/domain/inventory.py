@@ -103,11 +103,13 @@ class MovementSubtype:
     ADJUSTMENT = "ADJUSTMENT"
     PURCHASE = "PURCHASE"
     SALE = "SALE"
+    TRANSFER = "TRANSFER"   # ← nuevo
     DAMAGE = "DAMAGE"
     RETURN = "RETURN"
     DONATION = "DONATION"
     EXPIRED = "EXPIRED"
     THEFT = "THEFT"
+    DISPATCH = "DISPATCH"   # ← nuevo
     OTHER = "OTHER"
 
 class StockMovement(Base, TimestampMixin, TenantMixin, AuditMixin):

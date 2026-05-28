@@ -3,10 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from typing import List
-from app.api.deps import get_db, get_current_tenant
+from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from app.domain.treasury import AccountsReceivable, AccountsPayable, TreasuryPayment
 from app.schemas.treasury import (
-    AccountsReceivableResponse, AccountsPayableResponse, 
+    AccountsReceivableResponse, AccountsPayableResponse,
     TreasuryPaymentCreate, TreasuryPaymentResponse
 )
 from app.services.treasury_service import TreasuryService
@@ -16,7 +16,8 @@ router = APIRouter()
 @router.get("/ar", response_model=List[AccountsReceivableResponse])
 async def get_ar_list(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("treasury")),
 ):
     result = await db.execute(
         select(AccountsReceivable)
@@ -28,7 +29,8 @@ async def get_ar_list(
 @router.get("/ap", response_model=List[AccountsPayableResponse])
 async def get_ap_list(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("treasury")),
 ):
     result = await db.execute(
         select(AccountsPayable)
@@ -41,6 +43,11 @@ async def get_ap_list(
 async def create_payment(
     payment_in: TreasuryPaymentCreate,
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    current_user = Depends(get_current_user),
+    _: bool = Depends(require_module("treasury")),
 ):
-    return await TreasuryService.process_payment(db, payment_in, tenant_id)
+    return await TreasuryService.process_payment(
+        db, payment_in, tenant_id,
+        user_id=current_user.id, user_name=current_user.username
+    )

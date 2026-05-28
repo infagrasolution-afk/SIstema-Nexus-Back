@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy import select
-from app.api.deps import get_db, get_current_tenant, get_current_user
+from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from app.services.sales_service import SalesService
 from app.services.pdf_service import PDFService
 from app.schemas.sales import SaleCreate, SaleResponse, BudgetCreate, BudgetResponse, CustomerCreate
@@ -13,10 +13,11 @@ router = APIRouter()
 
 @router.post("/", response_model=SaleResponse)
 async def create_sale(
-    sale_in: SaleCreate, 
+    sale_in: SaleCreate,
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_module("sales")),
 ):
     try:
         return await SalesService.create_sale(db, sale_in, tenant_id, current_user.id, current_user.username)
@@ -28,7 +29,8 @@ async def find_or_create_customer(
     customer_in: CustomerCreate,
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_module("sales")),
 ):
     try:
         customer = await SalesService.find_or_create_customer(db, customer_in, tenant_id, current_user.id, current_user.username)
@@ -39,7 +41,8 @@ async def find_or_create_customer(
 @router.get("/on-hold", response_model=list[SaleResponse])
 async def get_on_hold_sales(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("sales")),
 ):
     result = await db.execute(
         select(Sale)

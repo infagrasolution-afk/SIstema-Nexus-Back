@@ -9,14 +9,14 @@ from app.services.inventory_service import InventoryService
 from app.services.currency_service import CurrencyService
 from app.services.wms_service import WMSService
 from app.schemas.inventory import (
-    ProductCreate, ProductResponse, 
+    ProductCreate, ProductResponse,
     WarehouseCreate, WarehouseResponse,
     BinLocationCreate, BinLocationResponse,
     BatchCreate, BatchResponse,
     StockAdjustmentCreate, StockMovementResponse,
     StockChargeCreate, StockDischargeCreate
 )
-
+from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from pydantic import BaseModel
 
 class RateUpdate(BaseModel):
@@ -34,7 +34,8 @@ router = APIRouter()
 @router.get("/exchange-rate")
 async def get_exchange_rate(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory")),
 ):
     rate = CurrencyService.get_bcv_rate()
     
@@ -48,7 +49,8 @@ async def get_exchange_rate(
 @router.get("/exchange-rate/history")
 async def get_exchange_history(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory")),
 ):
     result = await db.execute(
         select(ExchangeRateHistory)
@@ -61,7 +63,8 @@ async def get_exchange_history(
 @router.get("/alerts")
 async def get_inventory_alerts(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory")),
 ):
     return await WMSService.get_stock_alerts(db, tenant_id)
 
@@ -69,7 +72,8 @@ async def get_inventory_alerts(
 async def update_exchange_rate_manual(
     rate_in: RateUpdate,
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory")),
 ):
     new_hist = ExchangeRateHistory(
         rate=rate_in.rate, 
@@ -84,10 +88,12 @@ async def update_exchange_rate_manual(
 async def transfer_stock(
     transfer: StockTransfer,
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: BaseModel = Depends(get_current_user),
+    _: bool = Depends(require_module("inventory")),
 ):
     await InventoryService.transfer_stock(
-        db, transfer.product_id, transfer.from_warehouse_id, 
+        db, transfer.product_id, transfer.from_warehouse_id,
         transfer.to_warehouse_id, transfer.quantity, tenant_id
     )
     return {"message": "Transfer successful"}
@@ -97,7 +103,8 @@ async def adjust_stock(
     adjustment: StockAdjustmentCreate,
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
-    current_user: BaseModel = Depends(get_current_user) # get_current_user from auth
+    current_user: BaseModel = Depends(get_current_user),
+    _: bool = Depends(require_module("inventory")),
 ):
     movement = await InventoryService.adjust_stock(
         db=db,
@@ -110,7 +117,8 @@ async def adjust_stock(
 @router.get("/adjustments", response_model=List[StockMovementResponse])
 async def get_adjustments(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory")),
 ):
     from sqlalchemy.orm import selectinload
     from app.domain.inventory import StockMovement
@@ -129,7 +137,8 @@ async def create_charge(
     charge: StockChargeCreate,
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
-    current_user: BaseModel = Depends(get_current_user)
+    current_user: BaseModel = Depends(get_current_user),
+    _: bool = Depends(require_module("inventory")),
 ):
     movement = await InventoryService.charge_stock(
         db=db,
@@ -142,7 +151,8 @@ async def create_charge(
 @router.get("/charges", response_model=List[StockMovementResponse])
 async def get_charges(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory")),
 ):
     from sqlalchemy.orm import selectinload
     from app.domain.inventory import StockMovement, MovementSubtype
@@ -161,7 +171,8 @@ async def create_discharge(
     discharge: StockDischargeCreate,
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
-    current_user: BaseModel = Depends(get_current_user)
+    current_user: BaseModel = Depends(get_current_user),
+    _: bool = Depends(require_module("inventory")),
 ):
     movement = await InventoryService.discharge_stock(
         db=db,
@@ -174,7 +185,8 @@ async def create_discharge(
 @router.get("/discharges", response_model=List[StockMovementResponse])
 async def get_discharges(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory")),
 ):
     from sqlalchemy.orm import selectinload
     from app.domain.inventory import StockMovement, MovementType, MovementSubtype
@@ -195,7 +207,8 @@ async def get_discharges(
 @router.get("/products", response_model=List[ProductResponse])
 async def get_products(
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory")),
 ):
     result = await db.execute(select(Product).where(Product.tenant_id == tenant_id))
     products = result.scalars().all()
@@ -358,3 +371,57 @@ async def create_batch(
     await db.commit()
     await db.refresh(new_batch)
     return new_batch
+@router.post("/dispatch-notes/{dispatch_note_id}/dispatch")
+async def confirm_dispatch(
+    dispatch_note_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: BaseModel = Depends(get_current_user),
+    _: bool = Depends(require_module("inventory")),
+):
+    """Confirma el despacho de una nota: mueve stock del almacén origen al destino."""
+    from app.domain.inventory import DispatchNote, DispatchNoteItem, MovementType, MovementSubtype
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(
+        select(DispatchNote)
+        .where(DispatchNote.id == dispatch_note_id, DispatchNote.tenant_id == tenant_id)
+        .options(selectinload(DispatchNote.items))
+    )
+    note = result.scalars().first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Nota de despacho no encontrada")
+    if note.status not in ["PENDING", "IN_TRANSIT"]:
+        raise HTTPException(status_code=400, detail=f"La nota ya fue procesada (status: {note.status})")
+
+    for item in note.items:
+        # Descarga del almacén origen
+        await WMSService.register_movement(
+            db=db,
+            product_id=item.product_id,
+            warehouse_id=note.source_warehouse_id,
+            movement_type=MovementType.OUT,
+            movement_subtype=MovementSubtype.DISCHARGE,
+            quantity=item.quantity,
+            reference=f"Despacho #{dispatch_note_id}",
+            tenant_id=tenant_id,
+            user_id=current_user.id,
+            user_name=current_user.username,
+        )
+        # Carga en almacén destino
+        await WMSService.register_movement(
+            db=db,
+            product_id=item.product_id,
+            warehouse_id=note.destination_warehouse_id,
+            movement_type=MovementType.IN,
+            movement_subtype=MovementSubtype.CHARGE,
+            quantity=item.quantity,
+            reference=f"Recepción Despacho #{dispatch_note_id}",
+            tenant_id=tenant_id,
+            user_id=current_user.id,
+            user_name=current_user.username,
+        )
+
+    note.status = "RECEIVED"
+    await db.commit()
+    return {"message": f"Despacho #{dispatch_note_id} confirmado. Stock transferido correctamente."}

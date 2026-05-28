@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from app.api import deps
+from app.api.deps import require_module
 from app.services.accounting_service import AccountingService
 from app.schemas.accounting import Account, AccountCreate, JournalEntry, JournalEntryCreate
 from app.domain.user import User
@@ -11,7 +12,8 @@ router = APIRouter()
 @router.get("/accounts", response_model=List[Account])
 async def get_accounts(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
+    current_user: User = Depends(deps.get_current_user),
+    _: bool = Depends(require_module("accounting")),
 ):
     return await AccountingService.get_accounts(db, current_user.tenant_id)
 
@@ -19,14 +21,16 @@ async def get_accounts(
 async def create_account(
     account_in: AccountCreate,
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
+    current_user: User = Depends(deps.get_current_user),
+    _: bool = Depends(require_module("accounting")),
 ):
     return await AccountingService.create_account(db, account_in, current_user.tenant_id)
 
 @router.get("/journal-entries", response_model=List[JournalEntry])
 async def get_journal_entries(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
+    current_user: User = Depends(deps.get_current_user),
+    _: bool = Depends(require_module("accounting")),
 ):
     return await AccountingService.get_journal_entries(db, current_user.tenant_id)
 
