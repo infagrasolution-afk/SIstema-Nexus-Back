@@ -14,7 +14,8 @@ from app.schemas.inventory import (
     BinLocationCreate, BinLocationResponse,
     BatchCreate, BatchResponse,
     StockAdjustmentCreate, StockMovementResponse,
-    StockChargeCreate, StockDischargeCreate
+    StockChargeCreate, StockDischargeCreate,
+    DispatchNoteCreate, DispatchNoteResponse
 )
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from pydantic import BaseModel
