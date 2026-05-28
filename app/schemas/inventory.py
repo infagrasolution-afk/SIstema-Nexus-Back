@@ -46,6 +46,7 @@ class ProductBase(BaseModel):
     min_stock: float = 0.0
     max_stock: float = 0.0
     unit_of_measure: str = "unit"
+    image_url: Optional[str] = None
 
 class ProductCreate(ProductBase):
     category_id: Optional[int] = None
@@ -122,4 +123,34 @@ class StockMovementResponse(BaseModel):
     product: Optional[ProductResponse] = None
     warehouse: Optional[WarehouseResponse] = None
     
+    model_config = ConfigDict(from_attributes=True)
+
+# --- Dispatch Notes ---
+class DispatchNoteItemBase(BaseModel):
+    product_id: int
+    quantity: float
+
+class DispatchNoteItemCreate(DispatchNoteItemBase):
+    pass
+
+class DispatchNoteItemResponse(DispatchNoteItemBase):
+    id: int
+    product: Optional[ProductResponse] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class DispatchNoteBase(BaseModel):
+    source_warehouse_id: int
+    destination_warehouse_id: int
+    reference: Optional[str] = None
+
+class DispatchNoteCreate(DispatchNoteBase):
+    items: List[DispatchNoteItemCreate]
+
+class DispatchNoteResponse(DispatchNoteBase):
+    id: int
+    status: str
+    tenant_id: int
+    items: List[DispatchNoteItemResponse] = []
+    source_warehouse: Optional[WarehouseResponse] = None
+    destination_warehouse: Optional[WarehouseResponse] = None
     model_config = ConfigDict(from_attributes=True)

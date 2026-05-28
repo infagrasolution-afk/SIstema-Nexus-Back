@@ -85,6 +85,7 @@ class Product(Base, TimestampMixin, TenantMixin, AuditMixin):
     
     unit_of_measure = Column(String, default="unit") # kg, mt, box, etc
     track_serials = Column(Boolean, default=False)
+    image_url = Column(String, nullable=True)
     
     category = relationship("Category", back_populates="products")
     batches = relationship("Batch", back_populates="product")

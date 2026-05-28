@@ -425,3 +425,69 @@ async def confirm_dispatch(
     note.status = "RECEIVED"
     await db.commit()
     return {"message": f"Despacho #{dispatch_note_id} confirmado. Stock transferido correctamente."}
+
+@router.get("/dispatch-notes", response_model=List[DispatchNoteResponse])
+async def list_dispatch_notes(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant)
+):
+    from app.domain.inventory import DispatchNote, DispatchNoteItem
+    from app.schemas.inventory import DispatchNoteResponse
+    from sqlalchemy.orm import selectinload
+    
+    result = await db.execute(
+        select(DispatchNote)
+        .where(DispatchNote.tenant_id == tenant_id)
+        .options(
+            selectinload(DispatchNote.items).selectinload(DispatchNoteItem.product),
+            selectinload(DispatchNote.source_warehouse),
+            selectinload(DispatchNote.destination_warehouse)
+        )
+    )
+    return result.scalars().all()
+
+@router.post("/dispatch-notes", response_model=DispatchNoteResponse)
+async def create_dispatch_note(
+    note_in: DispatchNoteCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: BaseModel = Depends(get_current_user)
+):
+    from app.domain.inventory import DispatchNote, DispatchNoteItem
+    from app.schemas.inventory import DispatchNoteResponse
+    from sqlalchemy.orm import selectinload
+    
+    # 1. Create the master DispatchNote record
+    new_note = DispatchNote(
+        source_warehouse_id=note_in.source_warehouse_id,
+        destination_warehouse_id=note_in.destination_warehouse_id,
+        reference=note_in.reference,
+        status="PENDING",
+        tenant_id=tenant_id
+    )
+    db.add(new_note)
+    await db.flush() # gets new_note.id
+    
+    # 2. Add the items
+    for item in note_in.items:
+        new_item = DispatchNoteItem(
+            dispatch_note_id=new_note.id,
+            product_id=item.product_id,
+            quantity=item.quantity,
+            tenant_id=tenant_id
+        )
+        db.add(new_item)
+        
+    await db.commit()
+    
+    # Fetch complete note to return
+    result = await db.execute(
+        select(DispatchNote)
+        .where(DispatchNote.id == new_note.id)
+        .options(
+            selectinload(DispatchNote.items).selectinload(DispatchNoteItem.product),
+            selectinload(DispatchNote.source_warehouse),
+            selectinload(DispatchNote.destination_warehouse)
+        )
+    )
+    return result.scalars().first()
