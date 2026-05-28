@@ -666,8 +666,11 @@ CREATE TABLE stock_movements (
 	bin_location_id INTEGER, 
 	batch_id INTEGER, 
 	movement_type VARCHAR NOT NULL, 
+	movement_subtype VARCHAR,
 	quantity FLOAT NOT NULL, 
 	reference VARCHAR, 
+	document_number VARCHAR,
+	notes TEXT,
 	user_id INTEGER, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(), 
 	updated_at TIMESTAMP WITH TIME ZONE, 
@@ -688,6 +691,11 @@ CREATE TABLE stock_movements (
 ;
 CREATE INDEX ix_stock_movements_id ON stock_movements (id);
 CREATE INDEX ix_stock_movements_tenant_id ON stock_movements (tenant_id);
+CREATE INDEX ix_stock_movements_product_id ON stock_movements (product_id);
+CREATE INDEX ix_stock_movements_warehouse_id ON stock_movements (warehouse_id);
+CREATE INDEX ix_stock_movements_movement_type ON stock_movements (movement_type);
+CREATE INDEX ix_stock_movements_movement_subtype ON stock_movements (movement_subtype);
+CREATE INDEX ix_stock_movements_created_at ON stock_movements (created_at);
 
 CREATE TABLE stock_summary (
 	id SERIAL NOT NULL, 
@@ -843,85 +851,7 @@ CREATE TABLE accounts_receivable (
 CREATE INDEX ix_accounts_receivable_tenant_id ON accounts_receivable (tenant_id);
 CREATE INDEX ix_accounts_receivable_id ON accounts_receivable (id);
 
--- ============================================================
--- TABLA: accounts_payable (BUG-07: faltaba en el script original)
--- ============================================================
-CREATE TABLE accounts_payable (
-	id SERIAL NOT NULL,
-	purchase_id INTEGER NOT NULL,
-	supplier_id INTEGER NOT NULL,
-	total_amount FLOAT NOT NULL,
-	remaining_amount FLOAT NOT NULL,
-	due_date TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-	status debtstatus,
-	notes VARCHAR,
-	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-	updated_at TIMESTAMP WITH TIME ZONE,
-	tenant_id INTEGER NOT NULL,
-	created_by_id INTEGER,
-	created_by_name VARCHAR,
-	updated_by_id INTEGER,
-	updated_by_name VARCHAR,
-	PRIMARY KEY (id),
-	FOREIGN KEY(purchase_id) REFERENCES purchases (id),
-	FOREIGN KEY(supplier_id) REFERENCES suppliers (id),
-	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
-)
 
-;
-CREATE INDEX ix_accounts_payable_tenant_id ON accounts_payable (tenant_id);
-CREATE INDEX ix_accounts_payable_id ON accounts_payable (id);
-
--- ============================================================
--- TABLA: dispatch_notes (BUG-08: faltaba en el script original)
--- ============================================================
-CREATE TABLE dispatch_notes (
-	id SERIAL NOT NULL,
-	source_warehouse_id INTEGER NOT NULL,
-	destination_warehouse_id INTEGER NOT NULL,
-	status VARCHAR DEFAULT 'PENDING',
-	reference VARCHAR,
-	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-	updated_at TIMESTAMP WITH TIME ZONE,
-	tenant_id INTEGER NOT NULL,
-	created_by_id INTEGER,
-	created_by_name VARCHAR,
-	updated_by_id INTEGER,
-	updated_by_name VARCHAR,
-	PRIMARY KEY (id),
-	FOREIGN KEY(source_warehouse_id) REFERENCES warehouses (id),
-	FOREIGN KEY(destination_warehouse_id) REFERENCES warehouses (id),
-	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
-)
-
-;
-CREATE INDEX ix_dispatch_notes_id ON dispatch_notes (id);
-CREATE INDEX ix_dispatch_notes_tenant_id ON dispatch_notes (tenant_id);
-
--- ============================================================
--- TABLA: dispatch_note_items (BUG-08: faltaba en el script original)
--- ============================================================
-CREATE TABLE dispatch_note_items (
-	id SERIAL NOT NULL,
-	dispatch_note_id INTEGER NOT NULL,
-	product_id INTEGER NOT NULL,
-	quantity FLOAT NOT NULL,
-	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-	updated_at TIMESTAMP WITH TIME ZONE,
-	tenant_id INTEGER NOT NULL,
-	created_by_id INTEGER,
-	created_by_name VARCHAR,
-	updated_by_id INTEGER,
-	updated_by_name VARCHAR,
-	PRIMARY KEY (id),
-	FOREIGN KEY(dispatch_note_id) REFERENCES dispatch_notes (id) ON DELETE CASCADE,
-	FOREIGN KEY(product_id) REFERENCES products (id),
-	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
-)
-
-;
-CREATE INDEX ix_dispatch_note_items_id ON dispatch_note_items (id);
-CREATE INDEX ix_dispatch_note_items_tenant_id ON dispatch_note_items (tenant_id);
 
 
 
@@ -972,44 +902,6 @@ CREATE TABLE treasury_payments (
 CREATE INDEX ix_treasury_payments_tenant_id ON treasury_payments (tenant_id);
 CREATE INDEX ix_treasury_payments_id ON treasury_payments (id);
 
--- ============================================================
--- TABLA: stock_movements
--- Historial de movimientos de inventario (WMS)
--- ============================================================
-CREATE TABLE stock_movements (
-	id SERIAL NOT NULL,
-	product_id INTEGER NOT NULL,
-	warehouse_id INTEGER NOT NULL,
-	bin_location_id INTEGER,
-	batch_id INTEGER,
-	movement_type VARCHAR NOT NULL,
-	movement_subtype VARCHAR,
-	quantity FLOAT NOT NULL,
-	reference VARCHAR,
-	document_number VARCHAR,
-	notes TEXT,
-	user_id INTEGER,
-	created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-	updated_at TIMESTAMP WITH TIME ZONE,
-	tenant_id INTEGER NOT NULL,
-	created_by_id INTEGER,
-	created_by_name VARCHAR,
-	updated_by_id INTEGER,
-	updated_by_name VARCHAR,
-	PRIMARY KEY (id),
-	FOREIGN KEY(product_id) REFERENCES products (id),
-	FOREIGN KEY(warehouse_id) REFERENCES warehouses (id),
-	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
-)
-
-;
-CREATE INDEX ix_stock_movements_id ON stock_movements (id);
-CREATE INDEX ix_stock_movements_tenant_id ON stock_movements (tenant_id);
-CREATE INDEX ix_stock_movements_product_id ON stock_movements (product_id);
-CREATE INDEX ix_stock_movements_warehouse_id ON stock_movements (warehouse_id);
-CREATE INDEX ix_stock_movements_movement_type ON stock_movements (movement_type);
-CREATE INDEX ix_stock_movements_movement_subtype ON stock_movements (movement_subtype);
-CREATE INDEX ix_stock_movements_created_at ON stock_movements (created_at);
 
 -- ============================================================
 -- TABLA: system_movements

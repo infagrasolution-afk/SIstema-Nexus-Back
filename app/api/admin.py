@@ -80,6 +80,7 @@ async def create_tenant(
     
     # AUTO-CREATE the tenant's first admin user if provided
     if tenant_in.admin_username and tenant_in.admin_password:
+        user_modules = ",".join(new_tenant.modules.keys()) if isinstance(new_tenant.modules, dict) else str(new_tenant.modules)
         new_user = User(
             username=tenant_in.admin_username,
             email=tenant_in.email, # Use company email as default
@@ -87,7 +88,7 @@ async def create_tenant(
             tenant_id=new_tenant.id,
             is_active=True,
             is_superuser=False, # Tenant admin is NOT a global superuser
-            modules=new_tenant.modules
+            modules=user_modules
         )
         db.add(new_user)
         await db.commit()
