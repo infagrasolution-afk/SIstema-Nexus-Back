@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import hashlib
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -123,7 +124,7 @@ async def login_access_token(
     refresh_token = create_refresh_token(user.id, user.tenant_id, expires_delta=refresh_expires)
 
     refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-    hashed_rt = hash_token(refresh_token)
+    hashed_rt = hashlib.sha256(refresh_token.encode()).hexdigest()
 
     rt_entry = RefreshToken(
         user_id=user.id,
@@ -164,7 +165,15 @@ async def refresh_access_token(
     if stored is None or stored.revoked:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token revocado o no encontrado")
 
-    if not verify_password(refresh_token, stored.token):
+    # High-performance SHA-256 validation with legacy bcrypt fallback
+    token_sha = hashlib.sha256(refresh_token.encode()).hexdigest()
+    is_valid = False
+    if stored.token == token_sha:
+        is_valid = True
+    elif stored.token.startswith("$2b$") or stored.token.startswith("$2a$"):
+        is_valid = verify_password(refresh_token, stored.token)
+
+    if not is_valid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token no coincide")
 
     stored.revoked = True
@@ -176,7 +185,7 @@ async def refresh_access_token(
     new_refresh_token = create_refresh_token(int(token_data.sub), int(token_data.tenant_id), expires_delta=refresh_expires)
 
     new_refresh_payload = jwt.decode(new_refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-    new_hashed_rt = hash_token(new_refresh_token)
+    new_hashed_rt = hashlib.sha256(new_refresh_token.encode()).hexdigest()
 
     db.add(RefreshToken(
         user_id=int(token_data.sub),
