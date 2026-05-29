@@ -26,7 +26,7 @@ class TenantResponse(TenantBase):
     id: int
     license_key: Optional[str] = None
     subscription_end: Optional[datetime] = None
-    is_active: bool
+    is_active: Optional[bool] = True
     parent_id: Optional[int] = None
     
     model_config = ConfigDict(from_attributes=True)
