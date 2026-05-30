@@ -236,9 +236,17 @@ async def create_product(
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant)
 ):
+    from sqlalchemy.exc import IntegrityError
     new_product = Product(**product_in.model_dump(), tenant_id=tenant_id)
     db.add(new_product)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        error_msg = str(e.orig)
+        if "sku" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="El SKU ingresado ya está registrado para otro producto. Por favor, utiliza un SKU único.")
+        raise HTTPException(status_code=400, detail="Error de integridad: verifica que los datos sean válidos.")
     await db.refresh(new_product)
     new_product.stock = 0.0
     return new_product
@@ -250,6 +258,7 @@ async def update_product(
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant)
 ):
+    from sqlalchemy.exc import IntegrityError
     result = await db.execute(
         select(Product)
         .where(Product.id == product_id)
@@ -262,7 +271,15 @@ async def update_product(
     for field, value in product_in.model_dump().items():
         setattr(product, field, value)
         
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        error_msg = str(e.orig)
+        if "sku" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="El SKU ingresado ya está registrado para otro producto. Por favor, utiliza un SKU único.")
+        raise HTTPException(status_code=400, detail="Error de integridad: verifica que los datos sean válidos.")
+        
     await db.refresh(product)
     
     from app.domain.inventory import StockSummary
