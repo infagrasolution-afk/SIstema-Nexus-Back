@@ -60,6 +60,7 @@ class CashService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"{register.name} ocupada por {user_name}. Se requiere arqueo y cierre para continuar."
                 )
+            existing_session.register = register # Eagerly assign to prevent lazyload crash
             return existing_session # Already open for this user
             
         new_session = CashSession(
@@ -72,6 +73,7 @@ class CashService:
         db.add(new_session)
         await db.commit()
         await db.refresh(new_session)
+        new_session.register = register # Eagerly assign to prevent lazyload crash
         return new_session
 
     @staticmethod
@@ -100,6 +102,12 @@ class CashService:
         
         await db.commit()
         await db.refresh(session)
+        
+        # Eagerly load register to avoid serialization lazyload error
+        r_stmt = select(CashRegister).where(CashRegister.id == session.register_id)
+        r_res = await db.execute(r_stmt)
+        session.register = r_res.scalar_one()
+        
         return session
 
     @staticmethod
@@ -112,4 +120,7 @@ class CashService:
             CashSession.tenant_id == tenant_id
         )
         result = await db.execute(stmt)
-        return result.scalar_one_or_none()
+        session = result.scalar_one_or_none()
+        if session:
+            session.register = register # Eagerly assign to prevent lazyload crash
+        return session
