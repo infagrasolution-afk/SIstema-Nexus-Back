@@ -25,8 +25,10 @@ class CashSessionBase(BaseModel):
     register_id: int
     starting_cash: float
 
-class CashSessionCreate(CashSessionBase):
+class CashSessionCreate(BaseModel):
     computer_uid: str
+    starting_cash: float
+    register_id: Optional[int] = None
 
 class CashSessionClose(BaseModel):
     actual_cash: float

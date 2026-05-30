@@ -19,6 +19,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    try:
+        from app.scripts.update_db import update_all_databases
+        await update_all_databases()
+        print("Database schema sync completed successfully on startup!")
+    except Exception as e:
+        print(f"Error during startup database update: {e}")
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(

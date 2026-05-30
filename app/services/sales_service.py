@@ -102,8 +102,11 @@ class SalesService:
                 )
 
         new_sale.subtotal = subtotal
-        new_sale.tax_total = tax_total
-        new_sale.total = subtotal + tax_total
+        igtf_total = 0.0
+        if sale_in.currency == "USD":
+            igtf_total = (subtotal + tax_total) * 0.03
+        new_sale.tax_total = tax_total + igtf_total
+        new_sale.total = subtotal + tax_total + igtf_total
 
         # CxC Integration ONLY if not ON_HOLD
         if new_sale.status != "ON_HOLD" and new_sale.payment_method == "credit":

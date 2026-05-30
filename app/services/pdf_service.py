@@ -107,9 +107,18 @@ class PDFService:
         p.drawString(5 * inch, y, "Subtotal:")
         p.drawRightString(7.5 * inch, y, f"${sale.subtotal:,.2f}")
         
+        # Venezuelan Fiscal Taxes Separation
+        standard_iva = sale.subtotal * 0.16
+        igtf_total = sale.tax_total - standard_iva if sale.currency == "USD" else 0.0
+        
         y -= 0.2 * inch
         p.drawString(5 * inch, y, "IVA (16%):")
-        p.drawRightString(7.5 * inch, y, f"${sale.tax_total:,.2f}")
+        p.drawRightString(7.5 * inch, y, f"${standard_iva:,.2f}")
+        
+        if igtf_total > 0.01:
+            y -= 0.2 * inch
+            p.drawString(5 * inch, y, "IGTF (3%):")
+            p.drawRightString(7.5 * inch, y, f"${igtf_total:,.2f}")
         
         y -= 0.4 * inch
         p.setFillColor(brand_color)
