@@ -19,6 +19,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Professional Security Headers Middleware to protect against common web vulnerabilities
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    # Prevent clickjacking attacks by forbidding frame embedding
+    response.headers["X-Frame-Options"] = "DENY"
+    # Prevent browsers from MIME-sniffing a response away from the declared content-type
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Enable browser XSS filtering
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    # Control how much referrer information is sent
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Enforce HTTPS connections (HSTS)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Limit Content Security Policy to prevent unauthorized script injections
+    response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none';"
+    return response
+
 @app.on_event("startup")
 async def startup_event():
     try:

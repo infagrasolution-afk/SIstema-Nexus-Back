@@ -5,7 +5,16 @@ from app.core.config import settings
 
 # Master Engine for Global Data (Tenants, Users)
 MASTER_DATABASE_URL = settings.SQLALCHEMY_DATABASE_URI
-master_engine = create_async_engine(MASTER_DATABASE_URL, echo=False, future=True)
+master_engine = create_async_engine(
+    MASTER_DATABASE_URL, 
+    echo=False, 
+    future=True,
+    pool_size=10,             # Keep up to 10 active connections in pool
+    max_overflow=5,           # Allow up to 5 additional overflow connections
+    pool_recycle=1800,        # Recycle connections older than 30 mins to avoid stale connections
+    pool_timeout=30,          # Fail fast after 30s of waiting for a connection
+    pool_pre_ping=True        # Pre-ping to discard dead/closed connections automatically
+)
 MasterSessionLocal = async_sessionmaker(master_engine, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()
@@ -29,7 +38,12 @@ def get_tenant_engine(tenant_id: int, company_name: str = None):
             url, 
             echo=False, 
             future=True,
-            connect_args={"server_settings": {"search_path": f"{schema_name}, public"}}
+            connect_args={"server_settings": {"search_path": f"{schema_name}, public"}},
+            pool_size=5,              # Smaller pool size per tenant to prevent database connection exhaustion
+            max_overflow=2,           # Allow minimal overflow
+            pool_recycle=1800,        # Recycle connections
+            pool_timeout=15,          # Shorter timeout for fast response
+            pool_pre_ping=True        # Check connection health before using
         )
         tenant_engines[tenant_id] = engine
         
