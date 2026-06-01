@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api import inventory, sales, auth, dashboard, suppliers, purchases, users, tenants, admin, cash, accounting, treasury, roles, movements, manual
+from app.api import inventory, sales, auth, dashboard, suppliers, purchases, users, tenants, admin, cash, accounting, treasury, roles, movements, manual, support
 
 app = FastAPI(
     title="ERP Multi-Tenant API",
@@ -72,3 +72,4 @@ app.include_router(treasury.router, prefix="/api/v1/treasury", tags=["Treasury"]
 app.include_router(roles.router, prefix="/api/v1/roles", tags=["Roles & Permissions"])
 app.include_router(movements.router, prefix="/api/v1/movements", tags=["System Movements"])
 app.include_router(manual.router, prefix="/api/v1/manual", tags=["User Manual"])
+app.include_router(support.router, prefix="/api/v1/support", tags=["Support & Error Logs"])
