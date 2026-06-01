@@ -6,106 +6,78 @@ import io
 
 router = APIRouter()
 
-MANUAL_TEXT_ES = """# 📘 MANUAL DE USUARIO ERP — NEXUS VENEZUELA
+MANUAL_TEXT_ES = """# 📘 MANUAL DE USUARIO OFICIAL — NEXUS ERP VENEZUELA
 
-Bienvenido al manual oficial de usuario de **NEXUS ERP**, el sistema de gestión integral adaptado a la normativa y realidad comercial de Venezuela. Este documento le guiará a través del uso correcto de cada módulo operativo y administrativo.
-
----
-
-## 🔒 1. Acceso y Control de Seguridad
-
-### Ingreso al Sistema
-1. Introduzca su **Nombre de Usuario** y **Contraseña**.
-2. Presione **Iniciar Sesión**.
-
-### Bloqueo de Cuentas (Políticas de Seguridad)
-* **Intentos Permitidos:** 3 intentos fallidos.
-* **Usuarios Operativos:** Si se equivoca 3 veces, su cuenta se bloqueará por seguridad. Solicite al **Administrador de su Empresa** el desbloqueo desde la pantalla de *Gestión de Usuarios*.
-* **Administrador del Sistema:** Si la cuenta del Administrador se bloquea, la pantalla mostrará una alerta de color rojo con un enlace directo para contactar a Soporte Técnico vía WhatsApp o vía telefónica al **0412-0161906** para verificar su identidad, realizar el desbloqueo y restablecer su clave de acceso de manera segura.
+Bienvenido al manual oficial de operaciones de **NEXUS ERP**, el sistema de gestión integrada y adaptada a la normativa legal, fiscal y comercial de Venezuela. Este documento le guiará a través del uso y mejores prácticas de cada módulo del sistema.
 
 ---
 
-## 📦 2. Módulo de Inventario (WMS)
+## 🔒 1. Control de Acceso y Seguridad de Sesión
 
-El módulo de Inventario gestiona la existencia de mercancías en tiempo real.
+### A. Acceso Seguro al Portal
+1. Ingrese su **Nombre de Usuario** y su **Contraseña** en la pantalla principal.
+2. Presione **Entrar** en el botón de color azul zafiro.
+3. Al ingresar, se iniciará automáticamente el **Asistente Guiado (Wizard)** que le enseñará el funcionamiento básico paso a paso.
 
-### Registrar Productos
-1. Vaya a **Inventario > Productos** y haga clic en **Nuevo Producto**.
-2. Introduzca el **SKU (Código Único)**, el nombre, la categoría, el stock mínimo y máximo, y la unidad de medida (Ej: unidad, kg, caja).
-3. **Costo Promedio:** El sistema calcula de manera automática el costo promedio ponderado de sus productos con cada compra o ingreso con costo unitario.
-
-### Operaciones de Inventario
-* **Cargo de Inventario (Ingreso manual):** Utilizado para saldos iniciales o ingresos extraordinarios. Afecta el stock sumándolo.
-* **Descargo de Inventario (Salida manual):** Utilizado para mercancías dañadas, perdidas, donaciones o retiros del almacén. Resta stock de manera inmediata.
-* **Ajustes:** Cambios manuales para cuadrar inventarios físicos.
-* **Transferencias:** Mueve mercancía entre diferentes almacenes (Ej: de Depósito Principal a Almacén Sucursal) sin afectar el inventario total general.
+### B. Políticas de Bloqueo de Cuentas (Protección Antihackeo)
+* **Intentos Fallidos Permitidos:** 3 intentos.
+* **Bloqueo Operativo:** Al tercer intento fallido, la cuenta se bloquea por seguridad. Solicite al Administrador de su empresa que desbloquee la cuenta desde el panel de **Usuarios**.
+* **Bloqueo del Administrador:** Si la cuenta del Administrador se bloquea, aparecerá una alerta de color rojo con un enlace directo a Soporte Técnico vía WhatsApp o al número **0412-0161906** para restablecer la contraseña de forma segura.
 
 ---
 
-## 🛒 3. Módulo de Ventas y Facturación
+## 📦 2. Módulo de Inventario y Almacenes (WMS)
 
-### Registrar Ventas
-1. Ingrese a **Ventas > Nueva Venta**.
-2. Seleccione el cliente (o ingrese un cliente genérico "Consumidor Final").
-3. Busque el producto por SKU o nombre, ingrese la cantidad y agréguelo a la lista.
-4. Elija el **Método de Pago** (Efectivo, Transferencia, Pago Móvil, Punto de Venta o Divisas) y la moneda.
-5. Presione **Procesar Venta**.
-   * *Afectación de Stock:* Al procesar, el sistema descuenta de forma automática el stock correspondiente del almacén seleccionado.
-   * *Trazabilidad:* Se registra la venta en la bitácora universal de movimientos.
+El módulo de Inventario centraliza el control físico y el valor monetario de toda la mercancía en tiempo real.
 
-### Presupuestos y Notas de Entrega
-* **Presupuestos:** Permite crear una cotización sin comprometer stock. Puede ser convertida a Venta posteriormente.
-* **Notas de Entrega:** Documentos que justifican el despacho físico de mercancía al cliente.
+### A. Registro de Productos en el Catálogo
+1. Diríjase a **Inventario > Catálogo**.
+2. Presione el botón **Nuevo Producto**.
+3. Ingrese los datos del SKU (Código único), descripción, precio base de venta y límites de stock (mínimos/máximos).
+4. El sistema calculará el Costo Promedio Ponderado con cada nueva entrada comercial.
+
+### B. Cargos y Descargos Físicos
+* **Cargos (Ingresos manuales):** Permite ingresar existencias físicas al inventario (ejemplo: saldos iniciales, cuadres de auditoría).
+* **Descargos (Salidas manuales):** Registra el retiro inmediato de mercancía justificando mermas, pérdidas o donaciones, descontando stock al instante.
 
 ---
 
-## 📈 4. Módulo de Compras e Importaciones
+## 🛒 3. Módulo de Ventas y Facturación (POS)
 
-### Registrar Compras
+El Punto de Venta (POS) permite procesar facturas y cobros de manera ágil y dinámica en Bolívares y Divisas.
+
+### A. Gestión de Caja
+1. **Apertura de Caja:** Antes de vender, acceda a **Caja > Abrir Caja** e ingrese el saldo inicial físico disponible en Bs. y USD para cambio.
+2. **Cierre de Caja:** Al terminar el turno, acceda a **Caja > Cierre de Caja** e ingrese el conteo físico recaudado para compararlo contra los totales de venta.
+
+### B. Proceso de Venta
+1. Vaya a **Ventas > Nueva Venta** (o el botón de POS).
+2. Seleccione el cliente (o use Consumidor Final).
+3. Busque y agregue los productos indicando cantidades.
+4. Presione **Procesar Pago** y elija los métodos de pago (Efectivo, Pago Móvil, Punto de Venta o Divisas) y la moneda.
+
+---
+
+## 🛒 4. Módulo de Compras e Importaciones
+
+Permite reponer stock y mantener actualizados los costos promedios ponderados del catálogo.
+
 1. Vaya a **Compras > Registrar Compra**.
-2. Seleccione el Proveedor (o cree uno nuevo con su RIF/Cédula).
-3. Agregue los productos comprados indicando la cantidad e **importante:** el costo unitario de compra actual.
-4. Presione **Guardar Compra**.
-   * *Stock:* Suma existencias automáticamente al almacén seleccionado.
-   * *Costo Promedio:* Recalcula el costo promedio del producto en base al nuevo precio de compra.
-   * *Trazabilidad:* Genera un registro en la bitácora universal de movimientos.
+2. Ingrese el Proveedor y agregue los ítems detallando cantidad y **costo unitario de compra actual**.
+3. Al guardar, el inventario se incrementa síncronamente y el costo de catálogo se recalcula automáticamente.
 
 ---
 
-## 🏦 5. Módulo de Tesorería (CxC / CxP)
+## 🏦 5. Cuentas por Cobrar (CxC) y Cuentas por Pagar (CxP)
 
-Monitorea las deudas pendientes con clientes y proveedores.
-
-* **Cuentas por Cobrar (CxC):** Generadas automáticamente en ventas a crédito. Permite registrar abonos parciales o totales hasta liquidar la factura.
-* **Cuentas por Pagar (CxP):** Generadas automáticamente en compras a crédito con proveedores. Registre los egresos de dinero ordenadamente.
+* **Cuentas por Cobrar (CxC):** Registra saldos pendientes de clientes generados por ventas a crédito. Permite registrar abonos parciales ordenadamente.
+* **Cuentas por Pagar (CxP):** Registra compromisos adquiridos con proveedores por compras a plazos, facilitando la planeación de egresos.
 
 ---
 
 ## 📝 6. Bitácora Universal de Movimientos
 
-El ERP cuenta con una **Tabla Maestra de Movimientos (`SystemMovement`)** inmutable. Cada vez que realice un Cargo, Descargo, Ajuste, Venta, Compra, Despacho, Pago de CxC/CxP o Apertura/Cierre de Caja, el sistema graba de forma automática:
-1. La fecha y hora exacta.
-2. El usuario que lo realizó.
-3. El módulo y la operación.
-4. Detalles del producto, almacén y cantidad (si aplica).
-5. Montos monetarios involucrados.
-6. Descripción automática estructurada para auditorías transparentes.
-
-*Para consultar este historial, vaya a **Reportes > Historial Universal de Movimientos**.*
-
----
-
-## 🔧 7. Administración de la Empresa (Para el Administrador)
-
-### Crear y Gestionar Usuarios
-Como Administrador de la Empresa, usted puede crear cuentas adicionales para sus empleados:
-1. Ingrese a **Administración > Usuarios** y presione **Nuevo Usuario**.
-2. Asigne un **Rol** de trabajo para que el usuario solo pueda ver y realizar operaciones autorizadas:
-   * **Vendedor:** Limitado a ventas, consultar inventario y caja.
-   * **Almacenista:** Limitado a cargos, descargos, transferencias y despachos.
-   * **Contador:** Acceso a reportes, contabilidad y tesorería.
-   * **Cajero:** Operaciones de caja diarias.
-3. Defina los **Módulos Activos** que puede visualizar ese usuario en su menú lateral.
+Todas las operaciones críticas se graban de manera automática e inmutable en el Historial Universal de Movimientos, detallando fecha, hora, usuario y descripción exacta, garantizando auditorías 100% transparentes.
 """
 
 
