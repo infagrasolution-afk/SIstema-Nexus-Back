@@ -10,6 +10,24 @@ async def update_all_databases():
     print("Updating Master Database...")
     async with master_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+    print("Running automatic database branding migration from NEXUS to APEX ERP...")
+    try:
+        async with MasterSessionLocal() as session:
+            # 1. Update tenants table
+            await session.execute(text("UPDATE tenants SET name = 'APEX MASTER CORP' WHERE name = 'NEXUS MASTER CORP'"))
+            await session.execute(text("UPDATE tenants SET name = 'DEMO - APEX ERP' WHERE name = 'DEMO - NEXUS ERP'"))
+            await session.execute(text("UPDATE tenants SET email = 'admin@apexerp.com' WHERE email = 'admin@nexuserp.com'"))
+            await session.execute(text("UPDATE tenants SET email = 'demo@apexerp.com' WHERE email = 'demo@nexuserp.com'"))
+            
+            # 2. Update users table
+            await session.execute(text("UPDATE users SET email = 'admin@apexerp.com' WHERE email = 'admin@nexuserp.com'"))
+            await session.execute(text("UPDATE users SET email = 'demo@apexerp.com' WHERE email = 'demo@nexuserp.com'"))
+            
+            await session.commit()
+            print("Successfully updated database records from NEXUS to APEX ERP!")
+    except Exception as db_err:
+        print(f"Error performing data rebranding migration: {db_err}")
     
     print("Updating Tenant Databases (PostgreSQL)...")
     try:
