@@ -15,14 +15,17 @@ async def update_all_databases():
     try:
         async with MasterSessionLocal() as session:
             # 1. Update tenants table
-            await session.execute(text("UPDATE tenants SET name = 'APEX MASTER CORP' WHERE name = 'NEXUS MASTER CORP'"))
+            await session.execute(text("UPDATE tenants SET name = 'APEX MASTER CORP' WHERE id = 1"))
+            await session.execute(text("UPDATE tenants SET email = 'infagrasolution@gmail.com' WHERE id = 1"))
             await session.execute(text("UPDATE tenants SET name = 'DEMO - APEX ERP' WHERE name = 'DEMO - NEXUS ERP'"))
-            await session.execute(text("UPDATE tenants SET email = 'admin@apexerp.com' WHERE email = 'admin@nexuserp.com'"))
             await session.execute(text("UPDATE tenants SET email = 'demo@apexerp.com' WHERE email = 'demo@nexuserp.com'"))
             
             # 2. Update users table
-            await session.execute(text("UPDATE users SET email = 'admin@apexerp.com' WHERE email = 'admin@nexuserp.com'"))
+            await session.execute(text("UPDATE users SET email = 'infagrasolution@gmail.com' WHERE username = 'admin'"))
             await session.execute(text("UPDATE users SET email = 'demo@apexerp.com' WHERE email = 'demo@nexuserp.com'"))
+            
+            # 3. Update KPRISHOP license expiration to 2027-05-28 (1 year from registration on 2026-05-28)
+            await session.execute(text("UPDATE tenants SET subscription_end = '2027-05-28 23:59:59' WHERE LOWER(name) LIKE '%kprishop%'"))
             
             await session.commit()
             print("Successfully updated database records from NEXUS to APEX ERP!")
