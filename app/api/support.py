@@ -47,3 +47,40 @@ async def list_error_logs(
         select(AppErrorLog).order_by(desc(AppErrorLog.created_at)).limit(100)
     )
     return result.scalars().all()
+
+@router.delete("/error-logs/{log_id}")
+async def delete_error_log(
+    log_id: int,
+    db: AsyncSession = Depends(get_master_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Elimina un registro de error individual de la base de datos (Solo Superusuarios/Administradores del SaaS).
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere cuenta de Superadministrador SaaS.")
+        
+    result = await db.execute(select(AppErrorLog).where(AppErrorLog.id == log_id))
+    log_entry = result.scalars().first()
+    if not log_entry:
+        raise HTTPException(status_code=404, detail="Registro de error no encontrado")
+        
+    await db.delete(log_entry)
+    await db.commit()
+    return {"message": f"Registro de error #{log_id} de soporte técnico eliminado."}
+
+@router.delete("/error-logs")
+async def clear_all_error_logs(
+    db: AsyncSession = Depends(get_master_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Elimina TODOS los registros de error de la base de datos (Solo Superusuarios/Administradores del SaaS).
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere cuenta de Superadministrador SaaS.")
+        
+    from sqlalchemy import delete
+    await db.execute(delete(AppErrorLog))
+    await db.commit()
+    return {"message": "Todos los registros de incidencias han sido eliminados."}
