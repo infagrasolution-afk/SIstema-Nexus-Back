@@ -14,9 +14,9 @@ class Account(AccountBase):
     id: int
     balance: float
     is_active: bool
-    tenant_id: str
+    tenant_id: int
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -44,7 +44,7 @@ class JournalEntryCreate(JournalEntryBase):
 class JournalEntry(JournalEntryBase):
     id: int
     date: datetime
-    tenant_id: str
+    tenant_id: int
     details: List[JournalEntryDetail]
 
     model_config = ConfigDict(from_attributes=True)

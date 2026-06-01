@@ -9,15 +9,18 @@ from fastapi import HTTPException, status
 class CashService:
     @staticmethod
     async def get_or_assign_register(db: AsyncSession, computer_uid: str, tenant_id: int) -> CashRegister:
-        # 1. Try to find a register already assigned to this computer
+        # 1. Try to find a register already assigned to this computer globally (since computer_uid is globally unique)
         stmt = select(CashRegister).where(
-            CashRegister.computer_uid == computer_uid,
-            CashRegister.tenant_id == tenant_id
+            CashRegister.computer_uid == computer_uid
         )
         result = await db.execute(stmt)
         register = result.scalar_one_or_none()
         
         if register:
+            if register.tenant_id != tenant_id:
+                register.tenant_id = tenant_id
+                await db.commit()
+                await db.refresh(register)
             return register
             
         # 2. If not, find the next available register number for this tenant
