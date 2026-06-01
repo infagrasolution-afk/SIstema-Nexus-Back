@@ -1,0 +1,36 @@
+========================================================================
+🔌 AGENTE DE ENLACE FISCAL - NEXUS ERP VENEZUELA 🇻🇪
+========================================================================
+
+Este es el conector fiscal local que comunica tu punto de venta en la 
+nube con tu impresora fiscal física (The Factory HKA, Bematech, Aclas).
+
+------------------------------------------------------------------------
+📋 REQUISITOS DE INSTALACIÓN:
+------------------------------------------------------------------------
+1. Computadora con Sistema Operativo Windows 7, 8, 10 o 11.
+2. Impresora Fiscal encendida y conectada a la PC vía puerto USB o COM.
+3. Drivers y DLLs correspondientes a la marca instalados (ej: TFHKA.dll).
+
+------------------------------------------------------------------------
+🚀 PASOS PARA INICIAR:
+------------------------------------------------------------------------
+Paso 1: Extrae los archivos de este instalador en 'C:\NexusFiscalAgent'.
+Paso 2: Conecta tu impresora fiscal física y asegúrate de conocer su puerto
+        de comunicación (ej: COM1, COM2, USB001).
+Paso 3: Ejecuta 'nexus-fiscal-agent.exe'. Se abrirá una pequeña ventana
+        de comandos indicando: 'Servidor Fiscal escuchando en puerto 8080'.
+Paso 4: Entra a NEXUS ERP -> Ajustes de la Empresa -> Impresión Fiscal,
+        selecciona la marca de tu impresora, introduce el puerto y ¡listo!
+        Verás el indicador de conexión cambiar instantáneamente a color VERDE.
+
+------------------------------------------------------------------------
+🛡️ INFORME DE DIAGNÓSTICO LOCAL:
+------------------------------------------------------------------------
+El servidor local corre en: http://localhost:8080/status
+Si tienes dudas o necesitas asistencia técnica personalizada, escribe a
+nuestro equipo de soporte oficial de NEXUS ERP en tu consola Master.
+
+========================================================================
+✨ NEXUS ERP - El Odoo de Venezuela, con el poder de Profit Plus
+========================================================================
