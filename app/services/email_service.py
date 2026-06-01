@@ -13,11 +13,11 @@ class EmailService:
         In a real scenario, this would use smtplib or an external service like SendGrid/Mailgun.
         For now, we log the action to simulate the email sending.
         """
-        subject = f"IMPORTANT: Your NEXUS ERP License is expiring in {days_left} days"
+        subject = f"IMPORTANT: Your APEX ERP License is expiring in {days_left} days"
         body = f"""
         Hello {company_name},
         
-        This is an automated notification from NEXUS ERP.
+        This is an automated notification from APEX ERP.
         Your system license (Key: {license_key}) is scheduled to expire in {days_left} days.
         
         To avoid service interruption and ensure your data remains accessible, please contact 
@@ -26,7 +26,7 @@ class EmailService:
         License Key: {license_key}
         Expiration Date: In {days_left} days.
         
-        Thank you for using NEXUS ERP.
+        Thank you for using APEX ERP.
         """
         
         # Simulate sending
@@ -39,11 +39,11 @@ class EmailService:
 
     @staticmethod
     async def send_welcome_license(to_email: str, company_name: str, license_key: str, expiration_date: str):
-        subject = f"Welcome to NEXUS ERP - Your License is Active"
+        subject = f"Welcome to APEX ERP - Your License is Active"
         body = f"""
         Hello {company_name},
         
-        Your account in NEXUS ERP has been successfully created.
+        Your account in APEX ERP has been successfully created.
         
         Your License Details:
         License Key: {license_key}

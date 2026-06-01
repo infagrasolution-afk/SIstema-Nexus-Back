@@ -31,12 +31,12 @@ class PDFService:
                 print(f"Error loading logo for PDF: {e}")
                 p.setFont("Helvetica-Bold", 20)
                 p.setFillColor(brand_color)
-                p.drawString(1 * inch, y_header, sale.tenant.name if sale.tenant else "NEXUS ERP")
+                p.drawString(1 * inch, y_header, sale.tenant.name if sale.tenant else "APEX ERP")
                 y_header -= 0.3 * inch
         else:
             p.setFont("Helvetica-Bold", 20)
             p.setFillColor(brand_color)
-            p.drawString(1 * inch, y_header, sale.tenant.name if sale.tenant else "NEXUS ERP")
+            p.drawString(1 * inch, y_header, sale.tenant.name if sale.tenant else "APEX ERP")
             y_header -= 0.3 * inch
         
         p.setFillColor(colors.black)
@@ -130,7 +130,7 @@ class PDFService:
         p.setFillColor(colors.black)
         p.setFont("Helvetica-Oblique", 8)
         p.drawCentredString(width / 2, 0.7 * inch, "¡Gracias por su compra!")
-        p.drawCentredString(width / 2, 0.5 * inch, "Generado por NEXUS ERP - Sistema Multi-Tenant")
+        p.drawCentredString(width / 2, 0.5 * inch, "Generado por APEX ERP - Sistema Multi-Tenant")
 
         p.showPage()
         p.save()

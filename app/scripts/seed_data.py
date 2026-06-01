@@ -13,7 +13,7 @@ async def seed():
 
     async with MasterSessionLocal() as db:
         # 2. Create Default Tenant in Master
-        company_name = "Nexus ERP Demo"
+        company_name = "APEX ERP Demo"
         tenant = Tenant(
             name=company_name,
             email="admin@erp.com",

@@ -6,9 +6,9 @@ import io
 
 router = APIRouter()
 
-MANUAL_TEXT_ES = """# 📘 MANUAL DE USUARIO OFICIAL — NEXUS ERP VENEZUELA
+MANUAL_TEXT_ES = """# 📘 MANUAL DE USUARIO OFICIAL — APEX ERP VENEZUELA
 
-Bienvenido al manual oficial de operaciones de **NEXUS ERP**, el sistema de gestión integrada y adaptada a la normativa legal, fiscal y comercial de Venezuela. Este documento le guiará a través del uso y mejores prácticas de cada módulo del sistema.
+Bienvenido al manual oficial de operaciones de **APEX ERP**, el sistema de gestión integrada y adaptada a la normativa legal, fiscal y comercial de Venezuela. Este documento le guiará a través del uso y mejores prácticas de cada módulo del sistema.
 
 ---
 
@@ -16,7 +16,7 @@ Bienvenido al manual oficial de operaciones de **NEXUS ERP**, el sistema de gest
 
 ### A. Acceso Seguro al Portal
 1. Ingrese su **Nombre de Usuario** y su **Contraseña** en la pantalla principal.
-2. Presione **Entrar** en el botón de color azul zafiro.
+2. Presione **Login** en el botón de color azul zafiro.
 3. Al ingresar, se iniciará automáticamente el **Asistente Guiado (Wizard)** que le enseñará el funcionamiento básico paso a paso.
 
 ### B. Políticas de Bloqueo de Cuentas (Protección Antihackeo)
@@ -85,7 +85,7 @@ Todas las operaciones críticas se graban de manera automática e inmutable en e
 async def view_manual(current_user: User = Depends(get_current_user)):
     """Retorna el manual de usuario en formato estructurado de texto para el frontend."""
     return {
-        "title": "Manual de Usuario ERP - NEXUS",
+        "title": "Manual de Usuario ERP - APEX",
         "language": "es",
         "content_markdown": MANUAL_TEXT_ES,
         "support_phone": SUPPORT_PHONE,
@@ -101,6 +101,6 @@ async def download_manual_file(current_user: User = Depends(get_current_user)):
     file_like = io.BytesIO(MANUAL_TEXT_ES.encode("utf-8"))
     
     headers = {
-        "Content-Disposition": "attachment; filename=manual_usuario_nexus_erp.md"
+        "Content-Disposition": "attachment; filename=manual_usuario_apex_erp.md"
     }
     return StreamingResponse(file_like, media_type="text/markdown", headers=headers)

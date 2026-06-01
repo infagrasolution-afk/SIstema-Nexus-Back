@@ -23,8 +23,8 @@ async def create_superuser():
         if not tenant:
             tenant = Tenant(
                 id=1,
-                name="NEXUS MASTER CORP",
-                email="admin@nexuserp.com",
+                name="APEX MASTER CORP",
+                email="admin@apexerp.com",
                 license_key=f"MASTER-{uuid.uuid4().hex[:8].upper()}",
                 subscription_end=datetime.now() + timedelta(days=3650), # 10 years
                 is_active=True
