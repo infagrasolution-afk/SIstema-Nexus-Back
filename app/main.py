@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 from app.core.config import settings
-from app.api import inventory, sales, auth, dashboard, suppliers, purchases, users, tenants, admin, cash, accounting, treasury, roles, movements, manual, support
+from app.api import inventory, sales, auth, dashboard, suppliers, purchases, users, tenants, admin, cash, accounting, treasury, roles, movements, manual, support, fiscal
 
 app = FastAPI(
     title="ERP Multi-Tenant API",
@@ -79,3 +79,4 @@ app.include_router(roles.router, prefix="/api/v1/roles", tags=["Roles & Permissi
 app.include_router(movements.router, prefix="/api/v1/movements", tags=["System Movements"])
 app.include_router(manual.router, prefix="/api/v1/manual", tags=["User Manual"])
 app.include_router(support.router, prefix="/api/v1/support", tags=["Support & Error Logs"])
+app.include_router(fiscal.router, prefix="/api/v1/fiscal", tags=["Fiscal (SENIAT Venezuela)"])
