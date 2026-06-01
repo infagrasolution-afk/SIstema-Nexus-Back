@@ -43,7 +43,7 @@ async def create_superuser():
         if not user:
             user = User(
                 username=username,
-                email="admin@erp.com",
+                email="infagrasolution@gmail.com",
                 hashed_password=get_password_hash(password),
                 is_superuser=True,
                 is_active=True,

@@ -16,7 +16,7 @@ async def seed():
         company_name = "APEX ERP Demo"
         tenant = Tenant(
             name=company_name,
-            email="admin@erp.com",
+            email="infagrasolution@gmail.com",
             license_key="DEMO-12345",
             subscription_end=datetime.utcnow() + timedelta(days=365)
         )
@@ -25,7 +25,7 @@ async def seed():
 
         # 3. Create Admin User in Master
         admin = User(
-            email="admin@erp.com",
+            email="infagrasolution@gmail.com",
             hashed_password=get_password_hash("admin123_password"),
             is_active=True,
             is_superuser=True,
