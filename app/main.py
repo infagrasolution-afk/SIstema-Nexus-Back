@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 from app.core.config import settings
 from app.api import inventory, sales, auth, dashboard, suppliers, purchases, users, tenants, admin, cash, accounting, treasury, roles, movements, manual, support
 
@@ -36,6 +38,10 @@ async def add_security_headers(request: Request, call_next):
     # Limit Content Security Policy to prevent unauthorized script injections
     response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none';"
     return response
+
+# Create static directory if not exists
+os.makedirs("static/downloads", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.on_event("startup")
 async def startup_event():

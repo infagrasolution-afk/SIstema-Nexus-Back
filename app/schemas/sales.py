@@ -23,6 +23,8 @@ class SaleBase(BaseModel):
     exchange_rate: Optional[float] = 1.0
     cash_session_id: Optional[int] = None
     status: Optional[str] = "COMPLETED"
+    fiscal_invoice_number: Optional[str] = None
+    printer_serial: Optional[str] = None
 
 class SaleCreate(SaleBase):
     warehouse_id: int

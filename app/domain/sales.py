@@ -33,6 +33,8 @@ class Sale(Base, TimestampMixin, TenantMixin, AuditMixin):
     cash_session_id = Column(Integer, ForeignKey('cash_sessions.id'), nullable=True)
     is_accounted = Column(Boolean, default=False)
     status = Column(String, default="COMPLETED") # COMPLETED, ON_HOLD, CANCELLED
+    fiscal_invoice_number = Column(String, nullable=True)
+    printer_serial = Column(String, nullable=True)
     
     customer = relationship("Customer")
     tenant = relationship("app.domain.tenant.Tenant")

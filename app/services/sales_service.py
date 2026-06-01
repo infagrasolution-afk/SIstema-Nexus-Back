@@ -59,6 +59,8 @@ class SalesService:
             exchange_rate=sale_in.exchange_rate,
             cash_session_id=sale_in.cash_session_id,
             status=sale_in.status,
+            fiscal_invoice_number=sale_in.fiscal_invoice_number,
+            printer_serial=sale_in.printer_serial,
             subtotal=0, tax_total=0, total=0,
             tenant_id=tenant_id,
             created_by_id=user_id,
