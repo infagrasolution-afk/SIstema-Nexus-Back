@@ -2,7 +2,6 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import text
 from app.core.config import settings
-from app.domain.error_log import AppErrorLog
 
 # Master Engine for Global Data (Tenants, Users)
 MASTER_DATABASE_URL = settings.SQLALCHEMY_DATABASE_URI
@@ -69,3 +68,7 @@ async def init_tenant_db(tenant_id: int, company_name: str):
         await conn.run_sync(Base.metadata.create_all)
         
     return engine
+
+# Late import to avoid circular dependency, registering AppErrorLog in metadata
+from app.domain.error_log import AppErrorLog
+
