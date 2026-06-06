@@ -78,8 +78,8 @@ class PDFService:
         p.setFont("Helvetica-Bold", 10)
         p.drawString(1 * inch, height - 3.25 * inch, "Descripción")
         p.drawString(4.5 * inch, height - 3.25 * inch, "Cant")
-        p.drawString(5.5 * inch, height - 3.25 * inch, "Precio Unit.")
-        p.drawString(6.8 * inch, height - 3.25 * inch, "Total")
+        p.drawString(5.5 * inch, height - 3.25 * inch, "Precio Unit. (Bs.)")
+        p.drawString(6.8 * inch, height - 3.25 * inch, "Total (Bs.)")
         p.line(1 * inch, height - 3.35 * inch, 7.5 * inch, height - 3.35 * inch)
 
         # Table Content
@@ -89,8 +89,8 @@ class PDFService:
             product_name = getattr(detail.product, 'name', f"Producto {detail.product_id}")
             p.drawString(1 * inch, y, product_name[:40])
             p.drawRightString(4.8 * inch, y, str(detail.quantity))
-            p.drawRightString(6.3 * inch, y, f"${detail.unit_price:,.2f}")
-            p.drawRightString(7.5 * inch, y, f"${detail.subtotal:,.2f}")
+            p.drawRightString(6.3 * inch, y, f"{detail.unit_price:,.2f} Bs.")
+            p.drawRightString(7.5 * inch, y, f"{detail.subtotal:,.2f} Bs.")
             y -= 0.25 * inch
             
             if y < 1.5 * inch:
@@ -105,7 +105,7 @@ class PDFService:
         y -= 0.25 * inch
         p.setFont("Helvetica", 10)
         p.drawString(5 * inch, y, "Subtotal:")
-        p.drawRightString(7.5 * inch, y, f"${sale.subtotal:,.2f}")
+        p.drawRightString(7.5 * inch, y, f"{sale.subtotal:,.2f} Bs.")
         
         # Venezuelan Fiscal Taxes Separation
         standard_iva = sale.subtotal * 0.16
@@ -113,18 +113,31 @@ class PDFService:
         
         y -= 0.2 * inch
         p.drawString(5 * inch, y, "IVA (16%):")
-        p.drawRightString(7.5 * inch, y, f"${standard_iva:,.2f}")
+        p.drawRightString(7.5 * inch, y, f"{standard_iva:,.2f} Bs.")
         
         if igtf_total > 0.01:
             y -= 0.2 * inch
             p.drawString(5 * inch, y, "IGTF (3%):")
-            p.drawRightString(7.5 * inch, y, f"${igtf_total:,.2f}")
+            p.drawRightString(7.5 * inch, y, f"{igtf_total:,.2f} Bs.")
         
         y -= 0.4 * inch
         p.setFillColor(brand_color)
         p.setFont("Helvetica-Bold", 14)
         p.drawString(5 * inch, y, "TOTAL:")
-        p.drawRightString(7.5 * inch, y, f"${sale.total:,.2f}")
+        p.drawRightString(7.5 * inch, y, f"{sale.total:,.2f} Bs.")
+
+        # Show equivalence in USD if transaction was in USD or exchange rate is set
+        if sale.exchange_rate and sale.exchange_rate > 1:
+            y -= 0.22 * inch
+            p.setFont("Helvetica-Oblique", 9)
+            p.setFillColor(colors.black)
+            p.drawString(5 * inch, y, f"Tasa BCV del día:")
+            p.drawRightString(7.5 * inch, y, f"{sale.exchange_rate:,.2f} Bs/$")
+            
+            y -= 0.18 * inch
+            total_usd = sale.total / sale.exchange_rate
+            p.drawString(5 * inch, y, f"Total Ref. USD:")
+            p.drawRightString(7.5 * inch, y, f"${total_usd:,.2f}")
 
         # Footer
         p.setFillColor(colors.black)

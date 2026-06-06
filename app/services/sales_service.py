@@ -52,11 +52,13 @@ class SalesService:
         customer = cust_result.scalars().first()
         customer_name = customer.name if customer else f"Cliente #{sale_in.customer_id}"
 
+        rate = sale_in.exchange_rate if sale_in.exchange_rate and sale_in.exchange_rate > 0 else 1.0
+
         new_sale = Sale(
             customer_id=sale_in.customer_id,
             payment_method=sale_in.payment_method,
             currency=sale_in.currency,
-            exchange_rate=sale_in.exchange_rate,
+            exchange_rate=rate,
             cash_session_id=sale_in.cash_session_id,
             status=sale_in.status,
             fiscal_invoice_number=sale_in.fiscal_invoice_number,
@@ -70,7 +72,9 @@ class SalesService:
         await db.flush()
 
         for detail in sale_in.details:
-            detail_subtotal = detail.quantity * detail.unit_price
+            # Convert unit price from USD to Bs using daily exchange rate
+            unit_price_bs = detail.unit_price * rate
+            detail_subtotal = detail.quantity * unit_price_bs
             subtotal += detail_subtotal
             detail_tax = detail_subtotal * 0.16
             tax_total += detail_tax
@@ -79,7 +83,7 @@ class SalesService:
                 sale_id=new_sale.id,
                 product_id=detail.product_id,
                 quantity=detail.quantity,
-                unit_price=detail.unit_price,
+                unit_price=unit_price_bs,
                 subtotal=detail_subtotal,
                 tax_rate_id=detail.tax_rate_id,
                 tenant_id=tenant_id,

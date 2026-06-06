@@ -5,9 +5,10 @@ from sqlalchemy import select
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from app.services.sales_service import SalesService
 from app.services.pdf_service import PDFService
-from app.schemas.sales import SaleCreate, SaleResponse, BudgetCreate, BudgetResponse, CustomerCreate
+from app.schemas.sales import SaleCreate, SaleResponse, BudgetCreate, BudgetResponse, CustomerCreate, CustomerResponse, CustomerUpdate
 from app.domain.sales import Sale, Budget, Customer
 from app.domain.user import User
+from typing import List
 
 router = APIRouter()
 
@@ -141,3 +142,130 @@ async def approve_budget(
     budget.status = "APPROVED"
     await db.commit()
     return {"status": "success", "message": "Budget approved"}
+
+
+# --- Customer CRUD & Bulk Import ---
+@router.get("/customers", response_model=List[CustomerResponse])
+async def get_all_customers(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("sales"))
+):
+    result = await db.execute(
+        select(Customer)
+        .where(Customer.tenant_id == tenant_id)
+        .order_by(Customer.name.asc())
+    )
+    return result.scalars().all()
+
+
+@router.post("/customers", response_model=CustomerResponse)
+async def create_new_customer(
+    customer_in: CustomerCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_module("sales"))
+):
+    # Check if duplicate tax_id exists
+    dup_check = await db.execute(
+        select(Customer).where(Customer.tax_id == customer_in.tax_id, Customer.tenant_id == tenant_id)
+    )
+    if dup_check.scalars().first():
+        raise HTTPException(status_code=400, detail="El RIF / Cédula ya está registrado.")
+
+    new_cust = Customer(
+        **customer_in.model_dump(),
+        tenant_id=tenant_id,
+        created_by_id=current_user.id,
+        created_by_name=current_user.username
+    )
+    db.add(new_cust)
+    await db.commit()
+    await db.refresh(new_cust)
+    return new_cust
+
+
+@router.put("/customers/{customer_id}", response_model=CustomerResponse)
+async def update_customer_endpoint(
+    customer_id: int,
+    customer_in: CustomerUpdate,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("sales"))
+):
+    result = await db.execute(
+        select(Customer).where(Customer.id == customer_id, Customer.tenant_id == tenant_id)
+    )
+    customer = result.scalars().first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    for field, value in customer_in.model_dump(exclude_unset=True).items():
+        setattr(customer, field, value)
+
+    await db.commit()
+    await db.refresh(customer)
+    return customer
+
+
+@router.delete("/customers/{customer_id}")
+async def delete_customer_endpoint(
+    customer_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("sales"))
+):
+    result = await db.execute(
+        select(Customer).where(Customer.id == customer_id, Customer.tenant_id == tenant_id)
+    )
+    customer = result.scalars().first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    await db.delete(customer)
+    await db.commit()
+    return {"message": "Cliente eliminado"}
+
+
+@router.post("/customers/import")
+async def import_customers_bulk(
+    customers_in: List[CustomerCreate],
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_module("sales"))
+):
+    imported_count = 0
+    errors = []
+    
+    for idx, c_in in enumerate(customers_in):
+        if not c_in.tax_id or not c_in.name:
+            errors.append(f"Fila {idx+1}: Nombre y RIF/Cédula son obligatorios.")
+            continue
+            
+        # Check if already exists
+        check_stmt = select(Customer).where(Customer.tax_id == c_in.tax_id, Customer.tenant_id == tenant_id)
+        res = await db.execute(check_stmt)
+        existing = res.scalars().first()
+        
+        if existing:
+            # Update existing info
+            existing.name = c_in.name
+            if c_in.phone is not None: existing.phone = c_in.phone
+            if c_in.email is not None: existing.email = c_in.email
+            if c_in.address is not None: existing.address = c_in.address
+        else:
+            # Create new
+            new_c = Customer(
+                **c_in.model_dump(),
+                tenant_id=tenant_id,
+                created_by_id=current_user.id,
+                created_by_name=current_user.username
+            )
+            db.add(new_c)
+        imported_count += 1
+        
+    await db.commit()
+    return {"status": "success", "imported": imported_count, "errors": errors}
+

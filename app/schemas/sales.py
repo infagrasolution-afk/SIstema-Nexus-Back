@@ -10,6 +10,22 @@ class CustomerCreate(BaseModel):
     email: Optional[str] = None
     address: Optional[str] = None
 
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    tax_id: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+
+class CustomerResponse(BaseModel):
+    id: int
+    tax_id: str
+    name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
 class SaleDetailBase(BaseModel):
     product_id: int
     quantity: float

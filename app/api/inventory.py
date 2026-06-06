@@ -30,6 +30,9 @@ class StockTransfer(BaseModel):
     to_warehouse_id: int
     quantity: float
 
+class RecalculatePricesRequest(BaseModel):
+    margin_percent: float
+
 router = APIRouter()
 
 @router.get("/exchange-rate")
@@ -225,8 +228,13 @@ async def get_products(
     stock_result = await db.execute(stock_stmt)
     stock_dict = {row[0]: row[1] for row in stock_result.all()}
     
+    rate = CurrencyService.get_bcv_rate()
     for product in products:
         product.stock = stock_dict.get(product.id, 0.0)
+        # Stored in Bs, convert to USD for frontend UI
+        product.price = product.price / rate if rate > 0 else product.price
+        product.cost = product.cost / rate if rate > 0 else product.cost
+        product.average_cost = product.average_cost / rate if rate > 0 else product.average_cost
         
     return products
 
@@ -237,7 +245,15 @@ async def create_product(
     tenant_id: int = Depends(get_current_tenant)
 ):
     from sqlalchemy.exc import IntegrityError
-    new_product = Product(**product_in.model_dump(), tenant_id=tenant_id)
+    rate = CurrencyService.get_bcv_rate()
+    
+    # Convert input USD to Bs using daily exchange rate before storing
+    product_data = product_in.model_dump()
+    product_data["price"] = product_data["price"] * rate
+    product_data["cost"] = product_data["cost"] * rate
+    product_data["average_cost"] = product_data["average_cost"] * rate
+    
+    new_product = Product(**product_data, tenant_id=tenant_id)
     db.add(new_product)
     try:
         await db.commit()
@@ -249,6 +265,12 @@ async def create_product(
         raise HTTPException(status_code=400, detail="Error de integridad: verifica que los datos sean válidos.")
     await db.refresh(new_product)
     new_product.stock = 0.0
+    
+    # Present USD to the frontend
+    new_product.price = new_product.price / rate if rate > 0 else new_product.price
+    new_product.cost = new_product.cost / rate if rate > 0 else new_product.cost
+    new_product.average_cost = new_product.average_cost / rate if rate > 0 else new_product.average_cost
+    
     return new_product
 
 @router.put("/products/{product_id}", response_model=ProductResponse)
@@ -268,7 +290,13 @@ async def update_product(
     if not product:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
         
-    for field, value in product_in.model_dump().items():
+    rate = CurrencyService.get_bcv_rate()
+    product_data = product_in.model_dump()
+    product_data["price"] = product_data["price"] * rate
+    product_data["cost"] = product_data["cost"] * rate
+    product_data["average_cost"] = product_data["average_cost"] * rate
+    
+    for field, value in product_data.items():
         setattr(product, field, value)
         
     try:
@@ -291,6 +319,11 @@ async def update_product(
     )
     product.stock = stock_result.scalar() or 0.0
     
+    # Present USD to the frontend
+    product.price = product.price / rate if rate > 0 else product.price
+    product.cost = product.cost / rate if rate > 0 else product.cost
+    product.average_cost = product.average_cost / rate if rate > 0 else product.average_cost
+    
     return product
 
 @router.delete("/products/{product_id}")
@@ -311,6 +344,79 @@ async def delete_product(
     await db.delete(product)
     await db.commit()
     return {"message": "Producto eliminado"}
+
+
+@router.post("/products/import")
+async def import_products_bulk(
+    products_in: List[ProductCreate],
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory"))
+):
+    imported_count = 0
+    errors = []
+    rate = CurrencyService.get_bcv_rate()
+    
+    for idx, p_in in enumerate(products_in):
+        if not p_in.sku or not p_in.name:
+            errors.append(f"Fila {idx+1}: SKU y Nombre son campos obligatorios.")
+            continue
+            
+        # Check if already exists
+        check_stmt = select(Product).where(Product.sku == p_in.sku, Product.tenant_id == tenant_id)
+        res = await db.execute(check_stmt)
+        existing = res.scalars().first()
+        
+        price_bs = p_in.price * rate
+        cost_bs = p_in.cost * rate
+        avg_cost_bs = p_in.average_cost * rate
+        
+        if existing:
+            # Update existing
+            for field, value in p_in.model_dump().items():
+                if field == "price":
+                    existing.price = price_bs
+                elif field == "cost":
+                    existing.cost = cost_bs
+                elif field == "average_cost":
+                    existing.average_cost = avg_cost_bs
+                else:
+                    setattr(existing, field, value)
+        else:
+            # Create new
+            product_data = p_in.model_dump()
+            product_data["price"] = price_bs
+            product_data["cost"] = cost_bs
+            product_data["average_cost"] = avg_cost_bs
+            new_p = Product(**product_data, tenant_id=tenant_id)
+            db.add(new_p)
+            
+        imported_count += 1
+        
+    await db.commit()
+    return {"status": "success", "imported": imported_count, "errors": errors}
+
+
+@router.post("/products/recalculate")
+async def recalculate_product_prices(
+    req: RecalculatePricesRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory"))
+):
+    # Fetch all products
+    result = await db.execute(select(Product).where(Product.tenant_id == tenant_id))
+    products = result.scalars().all()
+    
+    updated_count = 0
+    for product in products:
+        if product.cost is not None and product.cost > 0:
+            product.price = product.cost * (1 + req.margin_percent / 100)
+            updated_count += 1
+            
+    await db.commit()
+    return {"status": "success", "updated_count": updated_count}
+
 
 # --- Warehouses ---
 @router.get("/warehouses", response_model=List[WarehouseResponse])
