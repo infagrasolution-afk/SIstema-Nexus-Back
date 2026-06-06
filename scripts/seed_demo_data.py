@@ -13,9 +13,9 @@ from app.domain.sales import Customer, TaxRate, Sale, SaleDetail
 from app.domain.purchases import Supplier
 
 async def seed():
-    tenant_id = 1
-    print("Connecting to PostgreSQL database schema for tenant_1...")
-    # Create session for tenant_1
+    tenant_id = 3
+    print("Connecting to PostgreSQL database schema for tenant_3...")
+    # Create session for tenant_3
     engine = get_tenant_engine(tenant_id)
     Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     
@@ -32,7 +32,7 @@ async def seed():
             print(f"Error checking/adding columns: {e}")
 
         # Clean previous seed data to avoid mixed currencies and stale records
-        print("Cleaning previous seed data for tenant_1...")
+        print("Cleaning previous seed data for tenant_3...")
         try:
             await db.execute(text("DELETE FROM sale_details"))
             await db.execute(text("DELETE FROM sales"))
