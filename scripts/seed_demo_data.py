@@ -34,13 +34,13 @@ async def seed():
         # Clean previous seed data to avoid mixed currencies and stale records
         print("Cleaning previous seed data for tenant_3...")
         try:
-            await db.execute(text("DELETE FROM sale_details"))
-            await db.execute(text("DELETE FROM sales"))
-            await db.execute(text("DELETE FROM stock_movements"))
-            await db.execute(text("DELETE FROM stock_summary"))
-            await db.execute(text("DELETE FROM products"))
-            await db.execute(text("DELETE FROM customers"))
-            await db.execute(text("DELETE FROM suppliers"))
+            await db.execute(text("DELETE FROM sale_details WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id})
+            await db.execute(text("DELETE FROM sales WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id})
+            await db.execute(text("DELETE FROM stock_movements WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id})
+            await db.execute(text("DELETE FROM stock_summary WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id})
+            await db.execute(text("DELETE FROM products WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id})
+            await db.execute(text("DELETE FROM customers WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id})
+            await db.execute(text("DELETE FROM suppliers WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id})
             await db.commit()
             print("Previous seed data cleaned successfully.")
         except Exception as e:

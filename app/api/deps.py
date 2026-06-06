@@ -179,6 +179,12 @@ def require_module(module_name: str):
                 return True
             raise HTTPException(status_code=403, detail="La licencia del módulo Administrativo ha vencido")
 
+        # Logic for Purchases (Compras y Proveedores)
+        if module_name == "purchases":
+            if is_mod_active("purchases") or is_mod_active("inventory") or is_mod_active("users"):
+                return True
+            raise HTTPException(status_code=403, detail="El módulo de Compras y Proveedores no está contratado o su licencia ha vencido")
+
         # Logic for Operative Modules
         if is_mod_active(module_name):
             return True
