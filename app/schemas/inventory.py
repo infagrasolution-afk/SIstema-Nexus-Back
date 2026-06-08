@@ -57,6 +57,14 @@ class ProductResponse(ProductBase):
     stock: float = 0.0
     model_config = ConfigDict(from_attributes=True)
 
+class InitialStockImport(BaseModel):
+    sku: str
+    name: str
+    cost: float = 0.0
+    price: float = 0.0
+    quantity: float
+    warehouse_id: int
+
 # --- Warehouses ---
 class WarehouseBase(BaseModel):
     name: str

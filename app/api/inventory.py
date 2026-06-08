@@ -15,7 +15,8 @@ from app.schemas.inventory import (
     BatchCreate, BatchResponse,
     StockAdjustmentCreate, StockMovementResponse,
     StockChargeCreate, StockDischargeCreate,
-    DispatchNoteCreate, DispatchNoteResponse
+    DispatchNoteCreate, DispatchNoteResponse,
+    InitialStockImport
 )
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from pydantic import BaseModel
@@ -396,6 +397,71 @@ async def import_products_bulk(
     await db.commit()
     return {"status": "success", "imported": imported_count, "errors": errors}
 
+@router.post("/import-initial-stock")
+async def import_initial_stock(
+    items_in: List[InitialStockImport],
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: BaseModel = Depends(get_current_user),
+    _: bool = Depends(require_module("inventory"))
+):
+    from sqlalchemy.exc import IntegrityError
+    from app.domain.inventory import MovementType, MovementSubtype
+    
+    imported_count = 0
+    errors = []
+    rate = CurrencyService.get_bcv_rate()
+    
+    for idx, item in enumerate(items_in):
+        if not item.sku or not item.name:
+            errors.append(f"Fila {idx+1}: SKU y Nombre son campos obligatorios.")
+            continue
+            
+        # 1. Find or Create Product
+        check_stmt = select(Product).where(Product.sku == item.sku, Product.tenant_id == tenant_id)
+        res = await db.execute(check_stmt)
+        product = res.scalars().first()
+        
+        price_bs = item.price * rate
+        cost_bs = item.cost * rate
+        
+        if not product:
+            new_product = Product(
+                sku=item.sku,
+                name=item.name,
+                price=price_bs,
+                cost=cost_bs,
+                average_cost=cost_bs,
+                tenant_id=tenant_id
+            )
+            db.add(new_product)
+            await db.flush() # flush to get the ID
+            product = new_product
+        else:
+            # Optionally update cost/price if they want the cargo inicial to overwrite?
+            # We'll just leave existing products as they are, but use them for the movement.
+            pass
+            
+        # 2. Inject Initial Stock
+        if item.quantity > 0:
+            charge = StockChargeCreate(
+                product_id=product.id,
+                warehouse_id=item.warehouse_id,
+                quantity=item.quantity,
+                reference=f"Cargo Inicial CSV - Fila {idx+1}",
+                notes="Importación masiva de saldo inicial"
+            )
+            await InventoryService.charge_stock(
+                db=db,
+                charge=charge,
+                tenant_id=tenant_id,
+                user_id=current_user.id
+            )
+            
+        imported_count += 1
+        
+    await db.commit()
+    return {"status": "success", "imported": imported_count, "errors": errors}
 
 @router.post("/products/recalculate")
 async def recalculate_product_prices(
