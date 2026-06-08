@@ -54,6 +54,29 @@ class AccountingService:
         return account
 
     @staticmethod
+    async def bulk_create_accounts(db: AsyncSession, accounts_in: list[AccountCreate], tenant_id: str):
+        # 1. Fetch existing accounts to check for duplicates by code
+        stmt = select(Account.code).where(Account.tenant_id == tenant_id)
+        result = await db.execute(stmt)
+        existing_codes = set(result.scalars().all())
+        
+        imported_count = 0
+        new_accounts = []
+        
+        for acc_in in accounts_in:
+            if acc_in.code not in existing_codes:
+                new_account = Account(**acc_in.model_dump(), tenant_id=tenant_id)
+                new_accounts.append(new_account)
+                existing_codes.add(acc_in.code)
+                imported_count += 1
+                
+        if new_accounts:
+            db.add_all(new_accounts)
+            await db.commit()
+            
+        return {"imported": imported_count}
+
+    @staticmethod
     async def create_journal_entry(db: AsyncSession, entry_in: JournalEntryCreate, tenant_id: str):
         # Validate that debits == credits
         total_debit = sum(d.debit for d in entry_in.details)

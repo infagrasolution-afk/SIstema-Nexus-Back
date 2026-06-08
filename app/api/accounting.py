@@ -26,6 +26,18 @@ async def create_account(
 ):
     return await AccountingService.create_account(db, account_in, current_user.tenant_id)
 
+@router.post("/accounts/import")
+async def import_accounts(
+    accounts_in: List[AccountCreate],
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    _: bool = Depends(require_module("accounting")),
+):
+    try:
+        return await AccountingService.bulk_create_accounts(db, accounts_in, current_user.tenant_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.get("/journal-entries", response_model=List[JournalEntry])
 async def get_journal_entries(
     db: AsyncSession = Depends(deps.get_db),
