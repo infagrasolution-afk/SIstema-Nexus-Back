@@ -78,6 +78,26 @@ Permite reponer stock y mantener actualizados los costos promedios ponderados de
 ## 📝 6. Bitácora Universal de Movimientos
 
 Todas las operaciones críticas se graban de manera automática e inmutable en el Historial Universal de Movimientos, detallando fecha, hora, usuario y descripción exacta, garantizando auditorías 100% transparentes.
+
+---
+
+## 📥 7. Importación Masiva de Datos (Carga Inicial)
+
+Para facilitar la migración de datos desde otros sistemas o desde Excel, APEX ERP cuenta con herramientas de carga masiva mediante archivos **CSV** (Valores separados por comas).
+
+### A. Carga Inicial de Inventario y Productos
+1. Vaya a **Inventario > Catálogo**.
+2. Presione **Importar Cargo Inicial**.
+3. Haga clic en **Descargar Plantilla** para obtener el archivo de ejemplo.
+4. Llene la plantilla en Excel (sin modificar los encabezados) y guárdela asegurándose de elegir el formato **CSV**.
+5. Suba el archivo. El sistema creará los productos que no existan y registrará un **Cargo de Inventario** por las cantidades indicadas.
+
+### B. Directorio de Clientes y Proveedores
+1. Diríjase al módulo de **Clientes** (en Ventas) o **Proveedores** (en Compras/Inventario).
+2. Presione el botón **Plantilla CSV** para descargar la estructura requerida.
+3. Llene los datos requeridos (Nombre, RIF, Teléfono, etc.) y guarde el archivo como CSV.
+4. Haga clic en **Importar** y seleccione su archivo. El sistema registrará todo el directorio en un instante.
+> **Importante:** Si un RIF/Identificación fiscal ya existe en la base de datos, el sistema actualizará los datos de contacto en lugar de crear un duplicado.
 """
 
 
