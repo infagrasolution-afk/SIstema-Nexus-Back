@@ -5,8 +5,10 @@ from sqlalchemy import select
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from app.services.sales_service import SalesService
 from app.services.pdf_service import PDFService
-from app.schemas.sales import SaleCreate, SaleResponse, BudgetCreate, BudgetResponse, CustomerCreate, CustomerResponse, CustomerUpdate
+from app.schemas.sales import SaleCreate, SaleResponse, BudgetCreate, BudgetResponse, CustomerCreate, CustomerResponse, CustomerUpdate, DebitNoteCreate, DebitNoteResponse
 from app.domain.sales import Sale, Budget, Customer
+from app.domain.accounting import DebitNote
+from app.domain.tenant import Tenant
 from app.domain.user import User
 from typing import List
 
@@ -269,3 +271,99 @@ async def import_customers_bulk(
     await db.commit()
     return {"status": "success", "imported": imported_count, "errors": errors}
 
+# --- Debit/Credit Notes ---
+from app.domain.treasury import AccountsReceivable
+
+@router.get("/commercial-notes", response_model=List[DebitNoteResponse])
+async def get_commercial_notes(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("sales"))
+):
+    result = await db.execute(
+        select(DebitNote)
+        .join(Customer, DebitNote.customer_id == Customer.id)
+        .where(Customer.tenant_id == tenant_id)
+        .order_by(DebitNote.created_at.desc())
+    )
+    return result.scalars().all()
+
+@router.post("/commercial-notes", response_model=DebitNoteResponse)
+async def create_commercial_note(
+    note_in: DebitNoteCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_module("sales"))
+):
+    # Ensure customer belongs to tenant
+    cust_check = await db.execute(
+        select(Customer).where(Customer.id == note_in.customer_id, Customer.tenant_id == tenant_id)
+    )
+    if not cust_check.scalars().first():
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    # Generate sequence number
+    count_stmt = select(DebitNote).join(Customer).where(Customer.tenant_id == tenant_id)
+    res_count = await db.execute(count_stmt)
+    total_notes = len(res_count.scalars().all())
+    
+    new_number = f"NC-{total_notes + 1:04d}" if note_in.type == 'Crédito' else f"ND-{total_notes + 1:04d}"
+
+    new_note = DebitNote(
+        **note_in.model_dump(),
+        number=new_number,
+        created_by_id=current_user.id,
+        created_by_name=current_user.username
+    )
+    
+    db.add(new_note)
+    
+    # --- AUTOMATIZACION CxC ---
+    # Si la nota afecta una factura específica, actualizar su saldo
+    if note_in.reference_invoice_id:
+        ar_stmt = select(AccountsReceivable).where(
+            AccountsReceivable.sale_id == note_in.reference_invoice_id,
+            AccountsReceivable.tenant_id == tenant_id
+        )
+        ar_res = await db.execute(ar_stmt)
+        ar_record = ar_res.scalars().first()
+        
+        if ar_record:
+            if note_in.type == 'Débito':
+                # Incrementa la deuda
+                ar_record.remaining_amount += note_in.amount
+                ar_record.total_amount += note_in.amount
+                if ar_record.status == 'PAID':
+                    ar_record.status = 'PARTIAL'
+            elif note_in.type == 'Crédito':
+                # Disminuye la deuda
+                ar_record.remaining_amount -= note_in.amount
+                if ar_record.remaining_amount <= 0:
+                    ar_record.remaining_amount = 0
+                    ar_record.status = 'PAID'
+                elif ar_record.remaining_amount < ar_record.total_amount:
+                    ar_record.status = 'PARTIAL'
+
+    await db.commit()
+    await db.refresh(new_note)
+    
+    # --- CONTABILIZACION AUTOMATICA (Journal Entry) ---
+    try:
+        # Check Tenant settings for accounting mode
+        tenant_record = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+        tenant_obj = tenant_record.scalars().first()
+        
+        # Default is 'manual' per user request
+        accounting_mode = tenant_obj.settings.get('accounting_mode', 'manual') if tenant_obj and tenant_obj.settings else 'manual'
+        
+        if accounting_mode == 'automatic':
+            from app.services.accounting_service import AccountingService
+            await AccountingService.account_commercial_note(db, new_note.id, str(tenant_id))
+        else:
+            print("Accounting mode is manual. Journal entry skipped.")
+    except Exception as e:
+        # Si falla la contabilización, no bloqueamos la creación de la nota
+        print(f"Error contabilizando nota comercial: {e}")
+
+    return new_note

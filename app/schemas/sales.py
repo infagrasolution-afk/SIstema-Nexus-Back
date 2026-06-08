@@ -94,3 +94,22 @@ class BudgetResponse(BudgetBase):
     created_by_name: Optional[str] = None
     items: List[BudgetItemResponse]
     model_config = ConfigDict(from_attributes=True)
+
+class DebitNoteCreate(BaseModel):
+    type: str
+    customer_id: int
+    amount: float
+    reason: str
+    reference_invoice_id: Optional[int] = None
+
+class DebitNoteResponse(BaseModel):
+    id: int
+    number: Optional[str] = None
+    type: str
+    customer_id: int
+    amount: float
+    reason: str
+    status: str
+    reference_invoice_id: Optional[int] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)

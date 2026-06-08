@@ -171,3 +171,27 @@ class DispatchNoteItem(Base, TimestampMixin, TenantMixin, AuditMixin):
     
     dispatch_note = relationship("DispatchNote", back_populates="items")
     product = relationship("Product")
+
+class InventoryAudit(Base, TimestampMixin, TenantMixin, AuditMixin):
+    __tablename__ = "inventory_audits"
+    id = Column(Integer, primary_key=True, index=True)
+    warehouse_id = Column(Integer, ForeignKey('warehouses.id'), nullable=False)
+    name = Column(String, nullable=False) # e.g. "Auditoría Mensual Mayo"
+    status = Column(String, default="DRAFT") # DRAFT, IN_PROGRESS, COMPLETED, CANCELLED
+    notes = Column(String, nullable=True)
+    
+    warehouse = relationship("Warehouse")
+    details = relationship("InventoryAuditDetail", back_populates="audit", cascade="all, delete-orphan")
+
+class InventoryAuditDetail(Base, TimestampMixin, TenantMixin, AuditMixin):
+    __tablename__ = "inventory_audit_details"
+    id = Column(Integer, primary_key=True, index=True)
+    audit_id = Column(Integer, ForeignKey('inventory_audits.id', ondelete='CASCADE'), nullable=False)
+    product_id = Column(Integer, ForeignKey('products.id'), nullable=False)
+    
+    expected_quantity = Column(Float, nullable=False, default=0.0) # Theoretical stock
+    counted_quantity = Column(Float, nullable=True) # Actual physical count
+    difference = Column(Float, nullable=True) # counted - expected
+    
+    audit = relationship("InventoryAudit", back_populates="details")
+    product = relationship("Product")

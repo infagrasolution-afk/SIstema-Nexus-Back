@@ -681,3 +681,125 @@ async def create_dispatch_note(
         )
     )
     return result.scalars().first()
+
+# --- Inventory Audits ---
+from app.domain.inventory import InventoryAudit, InventoryAuditDetail
+from app.schemas.inventory import InventoryAuditCreate, InventoryAuditResponse, InventoryAuditDetailCreate, InventoryAuditDetailResponse
+
+@router.get("/audits", response_model=List[InventoryAuditResponse])
+async def get_audits(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory"))
+):
+    result = await db.execute(
+        select(InventoryAudit)
+        .where(InventoryAudit.tenant_id == tenant_id)
+        .options(
+            selectinload(InventoryAudit.warehouse),
+            selectinload(InventoryAudit.details).selectinload(InventoryAuditDetail.product)
+        )
+        .order_by(InventoryAudit.created_at.desc())
+    )
+    return result.scalars().all()
+
+@router.post("/audits", response_model=InventoryAuditResponse)
+async def create_audit(
+    audit_in: InventoryAuditCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory"))
+):
+    # Crear auditoría
+    audit = InventoryAudit(
+        warehouse_id=audit_in.warehouse_id,
+        name=audit_in.name,
+        notes=audit_in.notes,
+        tenant_id=tenant_id,
+        status="IN_PROGRESS"
+    )
+    db.add(audit)
+    await db.flush()
+    
+    # Pre-cargar todos los productos como detalles esperando ser contados
+    result = await db.execute(select(Product).where(Product.tenant_id == tenant_id))
+    products = result.scalars().all()
+    
+    for p in products:
+        db.add(InventoryAuditDetail(
+            audit_id=audit.id,
+            product_id=p.id,
+            expected_quantity=p.stock,
+            tenant_id=tenant_id
+        ))
+        
+    await db.commit()
+    
+    # Devolver con relaciones
+    res = await db.execute(
+        select(InventoryAudit).where(InventoryAudit.id == audit.id)
+        .options(selectinload(InventoryAudit.warehouse), selectinload(InventoryAudit.details).selectinload(InventoryAuditDetail.product))
+    )
+    return res.scalars().first()
+
+@router.post("/audits/{audit_id}/details")
+async def add_audit_detail(
+    audit_id: int,
+    detail_in: InventoryAuditDetailCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory"))
+):
+    # Buscar el detalle existente
+    result = await db.execute(
+        select(InventoryAuditDetail)
+        .where(InventoryAuditDetail.audit_id == audit_id, InventoryAuditDetail.product_id == detail_in.product_id, InventoryAuditDetail.tenant_id == tenant_id)
+    )
+    detail = result.scalars().first()
+    
+    if not detail:
+        raise HTTPException(status_code=404, detail="Producto no encontrado en esta auditoría")
+        
+    detail.counted_quantity = detail_in.counted_quantity
+    detail.difference = detail_in.counted_quantity - detail.expected_quantity
+    await db.commit()
+    return {"message": "Conteo registrado"}
+
+@router.post("/audits/{audit_id}/apply")
+async def apply_audit(
+    audit_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: BaseModel = Depends(get_current_user),
+    _: bool = Depends(require_module("inventory"))
+):
+    result = await db.execute(
+        select(InventoryAudit).where(InventoryAudit.id == audit_id, InventoryAudit.tenant_id == tenant_id)
+        .options(selectinload(InventoryAudit.details))
+    )
+    audit = result.scalars().first()
+    if not audit:
+        raise HTTPException(status_code=404, detail="Auditoría no encontrada")
+    if audit.status == "COMPLETED":
+        raise HTTPException(status_code=400, detail="Auditoría ya aplicada")
+        
+    for detail in audit.details:
+        if detail.counted_quantity is not None and detail.difference != 0:
+            # Generate Adjustment
+            movement_type = MovementType.IN if detail.difference > 0 else MovementType.OUT
+            await WMSService.register_movement(
+                db=db,
+                product_id=detail.product_id,
+                warehouse_id=audit.warehouse_id,
+                movement_type=movement_type,
+                movement_subtype=MovementSubtype.ADJUSTMENT,
+                quantity=abs(detail.difference),
+                reference=f"Ajuste Auditoría: {audit.name}",
+                tenant_id=tenant_id,
+                user_id=current_user.id,
+                user_name=current_user.username
+            )
+            
+    audit.status = "COMPLETED"
+    await db.commit()
+    return {"message": "Auditoría aplicada y ajustes de inventario generados"}

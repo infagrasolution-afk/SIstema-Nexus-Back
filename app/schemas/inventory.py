@@ -162,3 +162,37 @@ class DispatchNoteResponse(DispatchNoteBase):
     source_warehouse: Optional[WarehouseResponse] = None
     destination_warehouse: Optional[WarehouseResponse] = None
     model_config = ConfigDict(from_attributes=True)
+
+# --- Inventory Audits ---
+class InventoryAuditDetailBase(BaseModel):
+    product_id: int
+    expected_quantity: float = 0.0
+    counted_quantity: Optional[float] = None
+    difference: Optional[float] = None
+
+class InventoryAuditDetailCreate(BaseModel):
+    product_id: int
+    counted_quantity: float
+
+class InventoryAuditDetailResponse(InventoryAuditDetailBase):
+    id: int
+    audit_id: int
+    product: Optional[ProductResponse] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class InventoryAuditBase(BaseModel):
+    warehouse_id: int
+    name: str
+    notes: Optional[str] = None
+
+class InventoryAuditCreate(InventoryAuditBase):
+    pass
+
+class InventoryAuditResponse(InventoryAuditBase):
+    id: int
+    status: str
+    tenant_id: int
+    created_at: datetime
+    warehouse: Optional[WarehouseResponse] = None
+    details: List[InventoryAuditDetailResponse] = []
+    model_config = ConfigDict(from_attributes=True)

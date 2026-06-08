@@ -48,3 +48,34 @@ class JournalEntry(JournalEntryBase):
     details: List[JournalEntryDetail]
 
     model_config = ConfigDict(from_attributes=True)
+
+class BankStatementLineBase(BaseModel):
+    date: datetime
+    description: str
+    reference: Optional[str] = None
+    amount: float
+
+class BankStatementLineCreate(BankStatementLineBase):
+    pass
+
+class BankStatementLineResponse(BankStatementLineBase):
+    id: int
+    statement_id: int
+    is_reconciled: bool
+    linked_journal_detail_id: Optional[int] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class BankStatementBase(BaseModel):
+    account_id: int
+    month: int
+    year: int
+
+class BankStatementCreate(BankStatementBase):
+    pass
+
+class BankStatementResponse(BankStatementBase):
+    id: int
+    status: str
+    tenant_id: int
+    lines: List[BankStatementLineResponse] = []
+    model_config = ConfigDict(from_attributes=True)

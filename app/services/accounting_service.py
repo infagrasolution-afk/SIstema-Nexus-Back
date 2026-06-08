@@ -119,6 +119,51 @@ class AccountingService:
         return je
 
     @staticmethod
+    async def account_commercial_note(db: AsyncSession, note_id: int, tenant_id: str):
+        from app.domain.accounting import DebitNote
+        await AccountingService.init_default_accounts(db, tenant_id)
+        
+        result = await db.execute(
+            select(DebitNote).where(DebitNote.id == note_id, DebitNote.tenant_id == tenant_id)
+        )
+        note = result.scalars().first()
+        
+        if not note:
+            raise HTTPException(status_code=404, detail="Nota comercial no encontrada")
+            
+        acc_stmt = select(Account).where(Account.tenant_id == tenant_id)
+        accounts = (await db.execute(acc_stmt)).scalars().all()
+        cxc = next((a for a in accounts if a.code == "1100"), None) # Cuentas por Cobrar
+        ingresos = next((a for a in accounts if a.code == "4000"), None) # Ingresos
+        
+        if not cxc or not ingresos:
+            raise HTTPException(status_code=500, detail="Cuentas contables por defecto no encontradas (CxC o Ingresos)")
+            
+        je = JournalEntry(
+            reference=note.number,
+            description=f"Nota de {note.type} aplicada al cliente",
+            tenant_id=tenant_id
+        )
+        db.add(je)
+        await db.flush()
+        
+        if note.type == 'Débito':
+            # + CxC (Débito), + Ingreso (Crédito)
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=cxc.id, debit=note.amount, tenant_id=tenant_id))
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=ingresos.id, credit=note.amount, tenant_id=tenant_id))
+            cxc.balance += note.amount
+            ingresos.balance += note.amount
+        else: # Crédito
+            # - Ingreso (Débito), - CxC (Crédito)
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=ingresos.id, debit=note.amount, tenant_id=tenant_id))
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=cxc.id, credit=note.amount, tenant_id=tenant_id))
+            ingresos.balance -= note.amount
+            cxc.balance -= note.amount
+            
+        await db.commit()
+        return je
+
+    @staticmethod
     async def get_journal_entries(db: AsyncSession, tenant_id: str):
         from sqlalchemy.orm import selectinload
         stmt = select(JournalEntry).where(JournalEntry.tenant_id == tenant_id).options(
@@ -279,3 +324,44 @@ class AccountingService:
             caja.balance -= payment.amount
             
         await db.flush()
+
+    @staticmethod
+    async def get_pnl(db: AsyncSession, tenant_id: str, start_date: str = None, end_date: str = None):
+        """
+        Generates a Profit & Loss (Estado de Resultados) report.
+        For a simple P&L, we take the current balances of Revenue and Expense accounts.
+        If date filtering is needed, we would query JournalEntryDetail joined with JournalEntry.
+        """
+        await AccountingService.init_default_accounts(db, tenant_id)
+        
+        # Simplest approach: group by account type
+        stmt = select(Account).where(
+            Account.tenant_id == tenant_id,
+            Account.type.in_([AccountType.REVENUE, AccountType.EXPENSE])
+        ).order_by(Account.code)
+        
+        result = await db.execute(stmt)
+        accounts = result.scalars().all()
+        
+        revenues = []
+        expenses = []
+        total_revenue = 0.0
+        total_expense = 0.0
+        
+        for acc in accounts:
+            if acc.type == AccountType.REVENUE:
+                revenues.append({"code": acc.code, "name": acc.name, "balance": acc.balance})
+                total_revenue += acc.balance
+            else:
+                expenses.append({"code": acc.code, "name": acc.name, "balance": acc.balance})
+                total_expense += acc.balance
+                
+        net_income = total_revenue - total_expense
+        
+        return {
+            "revenues": revenues,
+            "expenses": expenses,
+            "total_revenue": total_revenue,
+            "total_expense": total_expense,
+            "net_income": net_income
+        }
