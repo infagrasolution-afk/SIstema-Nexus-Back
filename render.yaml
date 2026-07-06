@@ -7,7 +7,7 @@ services:
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: DATABASE_URL
-        value: "postgresql://admin:nkj2VovKl0DDJgBZ1NonhTS6uLXxj5nu@dpg-d8b2pmcm0tmc73d5d6pg-a.virginia-postgres.render.com/erp_db_x91k"
+        value: "postgresql://admin:rvham9UEK8B8yhvKcRYk42BuMNrCaeVn@dpg-d95fdt5ckfvc73ba7d9g-a/erp_db_qoj0"
       - key: SECRET_KEY
         generateValue: true
       - key: PYTHON_VERSION

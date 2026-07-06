@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     
     # Postgres Connection String from Render
-    DATABASE_URL: str = "postgresql://admin:nkj2VovKl0DDJgBZ1NonhTS6uLXxj5nu@dpg-d8b2pmcm0tmc73d5d6pg-a.virginia-postgres.render.com/erp_db_x91k"
+    DATABASE_URL: str = "postgresql://admin:rvham9UEK8B8yhvKcRYk42BuMNrCaeVn@dpg-d95fdt5ckfvc73ba7d9g-a.virginia-postgres.render.com/erp_db_qoj0"
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
