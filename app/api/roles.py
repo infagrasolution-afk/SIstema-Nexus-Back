@@ -13,8 +13,15 @@ router = APIRouter()
 
 
 def _can_manage_roles(current_user: User) -> bool:
-    """Superadmin global O cualquier usuario autenticado de un tenant puede gestionar roles de su empresa."""
-    return current_user.is_superuser or (current_user.tenant_id is not None)
+    """Solo superadmin global O usuarios con permiso 'settings:write' pueden gestionar roles."""
+    if current_user.is_superuser:
+        return True
+    # Check if user has settings:write permission via their role
+    if hasattr(current_user, 'role') and current_user.role:
+        role_perms = [p.code for p in getattr(current_user.role, 'permissions', [])]
+        return "settings:write" in role_perms
+    # Fallback: allow tenant admins (users with no specific role restriction)
+    return current_user.tenant_id is not None and getattr(current_user, 'is_admin', False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

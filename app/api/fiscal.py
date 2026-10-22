@@ -31,20 +31,17 @@ async def get_libro_ventas(
     if not year:
         year = datetime.utcnow().year
 
-    # Cargar ventas completadas del inquilino para el mes/año seleccionado
+    # Filtrar directamente en SQL por mes y año
+    from sqlalchemy import extract
     stmt = select(Sale).options(selectinload(Sale.customer)).where(
         Sale.tenant_id == tenant_id,
-        Sale.status == "COMPLETED"
-    )
+        Sale.status == "COMPLETED",
+        extract('month', Sale.created_at) == month,
+        extract('year', Sale.created_at) == year,
+    ).order_by(Sale.created_at.asc())
     
     result = await db.execute(stmt)
-    all_sales = result.scalars().all()
-    
-    # Filtrar localmente por mes y año
-    sales = [
-        s for s in all_sales 
-        if s.created_at.month == month and s.created_at.year == year
-    ]
+    sales = result.scalars().all()
 
     output = io.StringIO()
     output.write('\ufeff') # UTF-8 BOM for Excel
@@ -145,20 +142,17 @@ async def get_libro_compras(
     if not year:
         year = datetime.utcnow().year
 
-    # Cargar compras completadas del inquilino para el mes/año seleccionado
+    # Filtrar directamente en SQL por mes y año
+    from sqlalchemy import extract
     stmt = select(Purchase).options(selectinload(Purchase.supplier)).where(
         Purchase.tenant_id == tenant_id,
-        Purchase.status == "COMPLETED"
-    )
-    
+        Purchase.status == "COMPLETED",
+        extract('month', Purchase.created_at) == month,
+        extract('year', Purchase.created_at) == year,
+    ).order_by(Purchase.created_at.asc())
+
     result = await db.execute(stmt)
-    all_purchases = result.scalars().all()
-    
-    # Filtrar por mes/año localmente
-    purchases = [
-        p for p in all_purchases 
-        if p.created_at.month == month and p.created_at.year == year
-    ]
+    purchases = result.scalars().all()
 
     output = io.StringIO()
     output.write('\ufeff')

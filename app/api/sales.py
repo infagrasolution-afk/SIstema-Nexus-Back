@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy import select
+from sqlalchemy import select, or_
+from typing import List, Optional
+from datetime import datetime
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from app.services.sales_service import SalesService
 from app.services.pdf_service import PDFService
@@ -10,7 +12,6 @@ from app.domain.sales import Sale, Budget, Customer
 from app.domain.accounting import DebitNote
 from app.domain.tenant import Tenant
 from app.domain.user import User
-from typing import List
 
 router = APIRouter()
 
@@ -26,6 +27,46 @@ async def create_sale(
         return await SalesService.create_sale(db, sale_in, tenant_id, current_user.id, current_user.username)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/list", response_model=list[SaleResponse])
+async def list_sales(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("sales")),
+    status: Optional[str] = Query(None, description="COMPLETED | ON_HOLD | CANCELLED"),
+    customer_id: Optional[int] = Query(None),
+    date_from: Optional[datetime] = Query(None),
+    date_to: Optional[datetime] = Query(None),
+    search: Optional[str] = Query(None, description="Buscar por número de factura o nota"),
+    limit: int = Query(100, le=500),
+    offset: int = Query(0),
+):
+    """Lista ventas con filtros opcionales por estado, cliente, fecha y búsqueda."""
+    stmt = (
+        select(Sale)
+        .where(Sale.tenant_id == tenant_id)
+        .options(selectinload(Sale.details), selectinload(Sale.customer))
+        .order_by(Sale.created_at.desc())
+    )
+    if status:
+        stmt = stmt.where(Sale.status == status)
+    if customer_id:
+        stmt = stmt.where(Sale.customer_id == customer_id)
+    if date_from:
+        stmt = stmt.where(Sale.created_at >= date_from)
+    if date_to:
+        stmt = stmt.where(Sale.created_at <= date_to)
+    if search:
+        stmt = stmt.where(
+            or_(
+                Sale.fiscal_invoice_number.ilike(f"%{search}%"),
+                Sale.printer_serial.ilike(f"%{search}%"),
+            )
+        )
+    stmt = stmt.limit(limit).offset(offset)
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 @router.post("/customers/fiscal", response_model=dict)
 async def find_or_create_customer(
@@ -58,29 +99,113 @@ async def get_on_hold_sales(
 @router.put("/{sale_id}/complete")
 async def complete_on_hold_sale(
     sale_id: int,
+    warehouse_id: int = Query(..., description="ID del almacén del cual descontar el stock"),
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
 ):
-    # Retrieve the sale
+    """Completa una venta en espera (ON_HOLD): descuenta inventario, registra CxC y bitácora."""
     result = await db.execute(
-        select(Sale).where(Sale.id == sale_id, Sale.tenant_id == tenant_id, Sale.status == "ON_HOLD").options(selectinload(Sale.details))
+        select(Sale)
+        .where(Sale.id == sale_id, Sale.tenant_id == tenant_id, Sale.status == "ON_HOLD")
+        .options(selectinload(Sale.details), selectinload(Sale.customer))
     )
     sale = result.scalars().first()
     if not sale:
-        raise HTTPException(status_code=404, detail="Sale not found or not on hold")
+        raise HTTPException(status_code=404, detail="Venta no encontrada o no está en espera")
 
     sale.status = "COMPLETED"
-    
-    # Process inventory and CxC that was skipped
+
+    from app.services.wms_service import WMSService
+    from app.domain.inventory import MovementType, MovementSubtype
+    from app.services.treasury_service import TreasuryService
+    from app.services.movement_logger import MovementLogger
+
+    # Descontar inventario por cada línea de la venta
     for detail in sale.details:
-        from app.services.wms_service import WMSService
-        from app.domain.inventory import MovementType
-        # Note: Ideally, warehouse_id should be stored in sale or details. We'll use a default for now.
-        # This requires adjusting the schema if warehouse_id is dynamic per detail.
-        pass # In a real implementation, we need the warehouse_id to deduct. We assume it's deducted in complete step.
-        
+        await WMSService.register_movement(
+            db=db,
+            product_id=detail.product_id,
+            warehouse_id=warehouse_id,
+            movement_type=MovementType.OUT,
+            movement_subtype=MovementSubtype.SALE,
+            quantity=detail.quantity,
+            reference=f"Completar Venta #{sale.id:06d} (era ON_HOLD)",
+            tenant_id=tenant_id,
+            user_id=current_user.id,
+            user_name=current_user.username,
+        )
+
+    # Crear CxC si fue a crédito
+    if sale.payment_method == "credit":
+        await TreasuryService.create_ar(db, sale.id, sale.customer_id, sale.total, tenant_id)
+
+    # Registrar en bitácora
+    customer_name = sale.customer.name if sale.customer else f"Cliente #{sale.customer_id}"
+    await MovementLogger.log_sale(
+        db=db,
+        tenant_id=tenant_id,
+        sale_id=sale.id,
+        customer_name=customer_name,
+        total=sale.total,
+        currency=sale.currency or "VES",
+        payment_method=sale.payment_method,
+        user_id=current_user.id,
+        user_name=current_user.username,
+        status="COMPLETED",
+    )
+
     await db.commit()
-    return {"status": "success", "message": "Sale completed"}
+    return {"status": "success", "message": f"Venta #{sale_id} completada exitosamente"}
+
+
+@router.put("/{sale_id}/cancel")
+async def cancel_sale(
+    sale_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_module("sales")),
+):
+    """Cancela una venta. Si estaba COMPLETED, revierte el inventario. No cancela ventas de caja cerrada."""
+    result = await db.execute(
+        select(Sale)
+        .where(Sale.id == sale_id, Sale.tenant_id == tenant_id)
+        .options(selectinload(Sale.details))
+    )
+    sale = result.scalars().first()
+    if not sale:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    if sale.status == "CANCELLED":
+        raise HTTPException(status_code=400, detail="La venta ya está cancelada")
+
+    prev_status = sale.status
+    sale.status = "CANCELLED"
+
+    # Si estaba completada, revertir inventario (requiere warehouse info)
+    # La reversión se hace como un CHARGE (entrada de inventario) en cada detalle
+    if prev_status == "COMPLETED":
+        from app.services.wms_service import WMSService
+        from app.domain.inventory import MovementType, MovementSubtype
+        for detail in sale.details:
+            try:
+                await WMSService.register_movement(
+                    db=db,
+                    product_id=detail.product_id,
+                    warehouse_id=1,  # Default warehouse - ideally stored per sale
+                    movement_type=MovementType.IN,
+                    movement_subtype=MovementSubtype.ADJUSTMENT,
+                    quantity=detail.quantity,
+                    reference=f"Reversa Venta Cancelada #{sale.id:06d}",
+                    tenant_id=tenant_id,
+                    user_id=current_user.id,
+                    user_name=current_user.username,
+                )
+            except Exception:
+                pass  # Si el producto ya no existe, se registra igualmente
+
+    await db.commit()
+    return {"status": "success", "message": f"Venta #{sale_id} cancelada", "reverted_inventory": prev_status == "COMPLETED"}
 
 @router.get("/{sale_id}/invoice")
 async def get_sale_invoice(

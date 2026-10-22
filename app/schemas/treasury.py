@@ -18,8 +18,29 @@ class TreasuryPaymentResponse(TreasuryPaymentBase):
     payment_date: datetime
     model_config = ConfigDict(from_attributes=True)
 
+
+class CustomerBasicResponse(BaseModel):
+    id: int
+    name: str
+    tax_id: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class SupplierBasicResponse(BaseModel):
+    id: int
+    name: str
+    tax_id: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AccountsReceivableCreate(BaseModel):
+    sale_id: Optional[int] = None  # Opcional para CxC manuales
+    customer_id: int
+    total_amount: float
+    due_date: datetime
+    notes: Optional[str] = None
+
 class AccountsReceivableBase(BaseModel):
-    sale_id: int
+    sale_id: Optional[int] = None
     customer_id: int
     total_amount: float
     remaining_amount: float
@@ -30,11 +51,20 @@ class AccountsReceivableBase(BaseModel):
 class AccountsReceivableResponse(AccountsReceivableBase):
     id: int
     created_at: datetime
+    customer: Optional[CustomerBasicResponse] = None
     payments: List[TreasuryPaymentResponse] = []
     model_config = ConfigDict(from_attributes=True)
 
+
+class AccountsPayableCreate(BaseModel):
+    purchase_id: Optional[int] = None  # Opcional para CxP manuales
+    supplier_id: int
+    total_amount: float
+    due_date: datetime
+    notes: Optional[str] = None
+
 class AccountsPayableBase(BaseModel):
-    purchase_id: int
+    purchase_id: Optional[int] = None
     supplier_id: int
     total_amount: float
     remaining_amount: float
@@ -45,5 +75,6 @@ class AccountsPayableBase(BaseModel):
 class AccountsPayableResponse(AccountsPayableBase):
     id: int
     created_at: datetime
+    supplier: Optional[SupplierBasicResponse] = None
     payments: List[TreasuryPaymentResponse] = []
     model_config = ConfigDict(from_attributes=True)
