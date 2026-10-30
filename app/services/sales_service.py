@@ -1,7 +1,8 @@
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.domain.sales import Sale, SaleDetail, Budget, BudgetItem, Customer
-from app.domain.inventory import MovementType, MovementSubtype
+from app.domain.inventory import Product, MovementType, MovementSubtype
 from app.services.wms_service import WMSService
 from app.schemas.sales import SaleCreate, BudgetCreate, CustomerCreate
 from app.services.treasury_service import TreasuryService
@@ -44,26 +45,34 @@ class SalesService:
         user_id: int,
         user_name: str
     ) -> Sale:
-        subtotal = 0.0
-        tax_total = 0.0
+        subtotal = Decimal('0.0000')
+        tax_total = Decimal('0.0000')
+        discount_total = Decimal('0.0000')
 
         # Fetch customer name for logging
         cust_result = await db.execute(select(Customer).where(Customer.id == sale_in.customer_id))
         customer = cust_result.scalars().first()
         customer_name = customer.name if customer else f"Cliente #{sale_in.customer_id}"
 
-        rate = sale_in.exchange_rate if sale_in.exchange_rate and sale_in.exchange_rate > 0 else 1.0
+        rate = Decimal(str(sale_in.exchange_rate)) if sale_in.exchange_rate and sale_in.exchange_rate > 0 else Decimal('1.0000')
 
         new_sale = Sale(
             customer_id=sale_in.customer_id,
+            warehouse_id=sale_in.warehouse_id or 1,
             payment_method=sale_in.payment_method,
-            currency=sale_in.currency,
+            currency=sale_in.currency or "USD",
             exchange_rate=rate,
             cash_session_id=sale_in.cash_session_id,
-            status=sale_in.status,
+            status=sale_in.status or "COMPLETED",
             fiscal_invoice_number=sale_in.fiscal_invoice_number,
+            control_number=sale_in.control_number,
             printer_serial=sale_in.printer_serial,
-            subtotal=0, tax_total=0, total=0,
+            notes=sale_in.notes,
+            subtotal=Decimal('0.0000'),
+            tax_total=Decimal('0.0000'),
+            total=Decimal('0.0000'),
+            discount_total=Decimal('0.0000'),
+            igtf_amount=Decimal('0.0000'),
             tenant_id=tenant_id,
             created_by_id=user_id,
             created_by_name=user_name
@@ -72,19 +81,47 @@ class SalesService:
         await db.flush()
 
         for detail in sale_in.details:
-            # Convert unit price from USD to Bs using daily exchange rate
-            unit_price_bs = detail.unit_price * rate
-            detail_subtotal = detail.quantity * unit_price_bs
-            subtotal += detail_subtotal
-            detail_tax = detail_subtotal * 0.16
-            tax_total += detail_tax
+            qty = Decimal(str(detail.quantity))
+            u_price = Decimal(str(detail.unit_price))
+
+            # Consultar producto para verificar exoneración y tasa de impuesto
+            prod_result = await db.execute(select(Product).where(Product.id == detail.product_id))
+            product = prod_result.scalars().first()
+
+            # Descuentos por ítem
+            disc_percent = Decimal(str(getattr(detail, 'discount_percent', 0) or 0))
+            disc_amount = Decimal(str(getattr(detail, 'discount_amount', 0) or 0))
+
+            base_line = qty * u_price
+            if disc_percent > 0:
+                disc_amount = (base_line * disc_percent) / Decimal('100.0')
+
+            line_subtotal = base_line - disc_amount
+            if line_subtotal < Decimal('0.0000'):
+                line_subtotal = Decimal('0.0000')
+
+            subtotal += line_subtotal
+            discount_total += disc_amount
+
+            # Cálculo de impuesto dinámico (SENIAT / Producto)
+            line_tax = Decimal('0.0000')
+            if product and not product.tax_exempt:
+                rate_to_apply = (product.tax_rate or Decimal('16.0000')) / Decimal('100.0')
+                line_tax = line_subtotal * rate_to_apply
+            elif not product:
+                # Fallback al 16% general de IVA en Venezuela si el producto no tiene configuración
+                line_tax = line_subtotal * Decimal('0.1600')
+
+            tax_total += line_tax
 
             new_detail = SaleDetail(
                 sale_id=new_sale.id,
                 product_id=detail.product_id,
-                quantity=detail.quantity,
-                unit_price=unit_price_bs,
-                subtotal=detail_subtotal,
+                quantity=qty,
+                unit_price=u_price,
+                subtotal=line_subtotal,
+                discount_percent=disc_percent,
+                discount_amount=disc_amount,
                 tax_rate_id=detail.tax_rate_id,
                 tenant_id=tenant_id,
                 created_by_id=user_id,
@@ -92,15 +129,15 @@ class SalesService:
             )
             db.add(new_detail)
 
-            # Inventory deduction via WMS ONLY if not ON_HOLD
+            # Deducción de inventario mediante WMS solo si no está en espera (ON_HOLD)
             if sale_in.status != "ON_HOLD":
                 await WMSService.register_movement(
                     db=db,
                     product_id=detail.product_id,
-                    warehouse_id=sale_in.warehouse_id,
+                    warehouse_id=sale_in.warehouse_id or 1,
                     movement_type=MovementType.OUT,
-                    movement_subtype=MovementSubtype.SALE,   # ← trazabilidad correcta
-                    quantity=detail.quantity,
+                    movement_subtype=MovementSubtype.SALE,
+                    quantity=qty,
                     reference=f"Venta #{new_sale.id:06d}",
                     tenant_id=tenant_id,
                     user_id=user_id,
@@ -108,9 +145,14 @@ class SalesService:
                 )
 
         new_sale.subtotal = subtotal
-        igtf_total = 0.0
-        if sale_in.currency == "USD":
-            igtf_total = (subtotal + tax_total) * 0.03
+        new_sale.discount_total = discount_total
+
+        # IGTF (Impuesto a las Grandes Transacciones Financieras 3% en pagos con divisas)
+        igtf_total = Decimal('0.0000')
+        if (sale_in.currency == "USD" or getattr(sale_in, 'igtf_amount', None)) and sale_in.payment_method in ["cash", "zelle", "crypto", "divisas"]:
+            igtf_total = (subtotal + tax_total) * Decimal('0.0300')
+
+        new_sale.igtf_amount = igtf_total
         new_sale.tax_total = tax_total + igtf_total
         new_sale.total = subtotal + tax_total + igtf_total
 

@@ -6,16 +6,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
-from app.domain.treasury import AccountsReceivable, AccountsPayable, TreasuryPayment, DebtStatus
+from app.domain.treasury import AccountsReceivable, AccountsPayable, TreasuryPayment, DebtStatus, BankAccount
 from app.domain.sales import Customer
 from app.domain.purchases import Supplier
 from app.schemas.treasury import (
     AccountsReceivableResponse, AccountsPayableResponse,
     AccountsReceivableCreate, AccountsPayableCreate,
-    TreasuryPaymentCreate, TreasuryPaymentResponse
+    TreasuryPaymentCreate, TreasuryPaymentResponse,
+    BankAccountCreate, BankAccountUpdate, BankAccountResponse
 )
 from app.services.treasury_service import TreasuryService
 
@@ -50,7 +51,7 @@ async def get_ar_list(
         stmt = stmt.where(AccountsReceivable.customer_id == customer_id)
     if overdue_only:
         stmt = stmt.where(
-            AccountsReceivable.due_date < datetime.utcnow(),
+            AccountsReceivable.due_date < datetime.now(timezone.utc),
             AccountsReceivable.status.in_([DebtStatus.OPEN, DebtStatus.PARTIAL])
         )
     stmt = stmt.limit(limit).offset(offset)
@@ -306,7 +307,7 @@ async def get_treasury_summary(
     _: bool = Depends(require_module("treasury")),
 ):
     """Resumen ejecutivo de tesorería: totales AR/AP abiertos, vencidos y cobrados."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     ar_total_open = await db.scalar(
         select(func.sum(AccountsReceivable.remaining_amount)).where(
@@ -362,3 +363,102 @@ async def get_treasury_summary(
         "net_position": float((ar_total_open or 0) - (ap_total_open or 0)),
         "generated_at": now.isoformat(),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cuentas Bancarias (Bank Accounts)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/bank-accounts", response_model=List[BankAccountResponse])
+async def list_bank_accounts(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("treasury")),
+):
+    """Lista todas las cuentas bancarias de la empresa."""
+    stmt = (
+        select(BankAccount)
+        .where(BankAccount.tenant_id == tenant_id)
+        .order_by(BankAccount.bank_name.asc())
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.post("/bank-accounts", response_model=BankAccountResponse)
+async def create_bank_account(
+    account_in: BankAccountCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user = Depends(get_current_user),
+    _: bool = Depends(require_module("treasury")),
+):
+    """Crea una nueva cuenta bancaria."""
+    new_account = BankAccount(
+        bank_name=account_in.bank_name,
+        account_number=account_in.account_number,
+        account_type=account_in.account_type or "Corriente",
+        currency=account_in.currency or "USD",
+        initial_balance=account_in.initial_balance,
+        current_balance=account_in.initial_balance,
+        is_active=account_in.is_active if account_in.is_active is not None else True,
+        notes=account_in.notes,
+        tenant_id=tenant_id,
+        created_by_id=current_user.id,
+        created_by_name=current_user.username
+    )
+    db.add(new_account)
+    await db.commit()
+    await db.refresh(new_account)
+    return new_account
+
+
+@router.get("/bank-accounts/{account_id}", response_model=BankAccountResponse)
+async def get_bank_account(
+    account_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("treasury")),
+):
+    """Obtiene el detalle de una cuenta bancaria específica."""
+    stmt = select(BankAccount).where(
+        BankAccount.id == account_id,
+        BankAccount.tenant_id == tenant_id
+    )
+    result = await db.execute(stmt)
+    account = result.scalars().first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada")
+    return account
+
+
+@router.put("/bank-accounts/{account_id}", response_model=BankAccountResponse)
+async def update_bank_account(
+    account_id: int,
+    account_in: BankAccountUpdate,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user = Depends(get_current_user),
+    _: bool = Depends(require_module("treasury")),
+):
+    """Actualiza los datos de una cuenta bancaria."""
+    stmt = select(BankAccount).where(
+        BankAccount.id == account_id,
+        BankAccount.tenant_id == tenant_id
+    )
+    result = await db.execute(stmt)
+    account = result.scalars().first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada")
+
+    update_data = account_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(account, field, value)
+
+    account.updated_by_id = current_user.id
+    account.updated_by_name = current_user.username
+
+    await db.commit()
+    await db.refresh(account)
+    return account
+

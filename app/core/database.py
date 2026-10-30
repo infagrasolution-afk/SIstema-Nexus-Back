@@ -19,7 +19,8 @@ MasterSessionLocal = async_sessionmaker(master_engine, class_=AsyncSession, expi
 
 Base = declarative_base()
 
-# Cache for tenant engines
+# Cache for tenant engines (max 50 to avoid connection exhaustion)
+MAX_TENANT_ENGINES = 50
 tenant_engines = {}
 
 def get_tenant_engine(tenant_id: int, company_name: str = None):
@@ -28,6 +29,13 @@ def get_tenant_engine(tenant_id: int, company_name: str = None):
     In PostgreSQL, we use a single database with multiple schemas (e.g., schema 'tenant_1').
     """
     if tenant_id not in tenant_engines:
+        # If cache exceeds limit, dispose the oldest engine to free pool connections
+        if len(tenant_engines) >= MAX_TENANT_ENGINES:
+            oldest_tenant_id = next(iter(tenant_engines))
+            old_engine = tenant_engines.pop(oldest_tenant_id)
+            # Sync dispose isn't async, but sync_engine.dispose() releases sockets
+            old_engine.sync_engine.dispose()
+
         schema_name = f"tenant_{tenant_id}"
         
         # Connect to the main database but set the search_path to the tenant's schema
@@ -48,6 +56,13 @@ def get_tenant_engine(tenant_id: int, company_name: str = None):
         tenant_engines[tenant_id] = engine
         
     return tenant_engines[tenant_id]
+
+async def dispose_all_engines():
+    """Clean up master and tenant engines gracefully on application shutdown."""
+    for tid, eng in list(tenant_engines.items()):
+        await eng.dispose()
+    tenant_engines.clear()
+    await master_engine.dispose()
 
 async def get_master_db():
     async with MasterSessionLocal() as session:

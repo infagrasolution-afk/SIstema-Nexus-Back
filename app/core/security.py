@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 from typing import Any, AsyncGenerator, Optional
 from fastapi import Depends, HTTPException, status, Header
@@ -38,7 +38,7 @@ def create_access_token(subject: int | Any, tenant_id: int, expires_delta: timed
     """Create a short‑lived access token.
     Includes standard claims: exp, sub, tenant_id, jti, and token_type.
     """
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode = {
         "exp": expire,
         "sub": str(subject),
@@ -52,7 +52,7 @@ def create_refresh_token(subject: int | Any, tenant_id: int, expires_delta: time
     """Create a longer‑lived refresh token.
     Refresh tokens are stored hashed in the DB for revocation checks.
     """
-    expire = datetime.utcnow() + (expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS))
     to_encode = {
         "exp": expire,
         "sub": str(subject),

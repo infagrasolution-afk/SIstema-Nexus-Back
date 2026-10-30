@@ -2,14 +2,38 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 import os
 from app.core.config import settings
-from app.api import inventory, sales, auth, dashboard, suppliers, purchases, users, tenants, admin, cash, accounting, treasury, roles, movements, manual, support, fiscal
+from app.core.database import dispose_all_engines
+from app.api import (
+    inventory, sales, auth, dashboard, suppliers, purchases,
+    users, tenants, admin, cash, accounting, treasury, roles,
+    movements, manual, support, fiscal, payroll
+)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: sincronizar esquemas de base de datos
+    try:
+        from app.scripts.update_db import update_all_databases
+        await update_all_databases()
+        print("Database schema sync completed successfully on startup!")
+    except Exception as e:
+        print(f"Error during startup database update: {e}")
+    yield
+    # Shutdown: liberar conexiones de engines
+    try:
+        await dispose_all_engines()
+        print("Database engines disposed successfully on shutdown.")
+    except Exception as e:
+        print(f"Error during shutdown: {e}")
 
 app = FastAPI(
-    title="ERP Multi-Tenant API",
-    description="API for the multi-tenant ERP system focused on Inventory and Sales.",
-    version="1.0.0",
+    title="Nexus ERP API",
+    description="API for the multi-tenant Nexus ERP system with Venezuelan SENIAT compliance.",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 # CORS config
@@ -21,36 +45,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Professional Security Headers Middleware to protect against common web vulnerabilities
+# Professional Security Headers Middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
-    # Prevent clickjacking attacks by forbidding frame embedding
     response.headers["X-Frame-Options"] = "DENY"
-    # Prevent browsers from MIME-sniffing a response away from the declared content-type
     response.headers["X-Content-Type-Options"] = "nosniff"
-    # Enable browser XSS filtering
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    # Control how much referrer information is sent
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    # Enforce HTTPS connections (HSTS)
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    # Limit Content Security Policy to prevent unauthorized script injections
     response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none';"
     return response
 
 # Create static directory if not exists
 os.makedirs("static/downloads", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-@app.on_event("startup")
-async def startup_event():
-    try:
-        from app.scripts.update_db import update_all_databases
-        await update_all_databases()
-        print("Database schema sync completed successfully on startup!")
-    except Exception as e:
-        print(f"Error during startup database update: {e}")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -61,8 +70,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to the ERP Multi-Tenant API"}
+    return {"message": "Welcome to the Nexus ERP Multi-Tenant API (Venezuela Edition)"}
 
+# API Routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(inventory.router, prefix="/api/v1/inventory", tags=["Inventory"])
@@ -80,3 +90,4 @@ app.include_router(movements.router, prefix="/api/v1/movements", tags=["System M
 app.include_router(manual.router, prefix="/api/v1/manual", tags=["User Manual"])
 app.include_router(support.router, prefix="/api/v1/support", tags=["Support & Error Logs"])
 app.include_router(fiscal.router, prefix="/api/v1/fiscal", tags=["Fiscal (SENIAT Venezuela)"])
+app.include_router(payroll.router, prefix="/api/v1/payroll", tags=["Nómina y RRHH (LOTTT Venezuela)"])

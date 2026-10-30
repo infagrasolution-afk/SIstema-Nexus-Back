@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Numeric, Text
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.domain.base import TimestampMixin, TenantMixin, AuditMixin
@@ -16,7 +16,7 @@ class ExchangeRateHistory(Base, TimestampMixin, TenantMixin, AuditMixin):
     __tablename__ = "exchange_rate_history"
 
     id = Column(Integer, primary_key=True, index=True)
-    rate = Column(Float, nullable=False)
+    rate = Column(Numeric(18, 4), nullable=False)
     provider = Column(String, default="BCV") # BCV or Manual
     
 class Warehouse(Base, TimestampMixin, TenantMixin, AuditMixin):
@@ -70,18 +70,25 @@ class Product(Base, TimestampMixin, TenantMixin, AuditMixin):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True, nullable=False)
     sku = Column(String, unique=True, index=True, nullable=False)
+    barcode = Column(String, index=True, nullable=True)  # Código de barras EAN/UPC
     description = Column(String, nullable=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     
-    price = Column(Float, default=0.0)
-    cost = Column(Float, default=0.0)
-    average_cost = Column(Float, default=0.0)
+    # Precios — NUMERIC(18,4) para precisión financiera
+    price = Column(Numeric(18, 4), default=0.0)
+    cost = Column(Numeric(18, 4), default=0.0)
+    average_cost = Column(Numeric(18, 4), default=0.0)
+    margin_percent = Column(Numeric(8, 2), default=0.0)  # Margen de ganancia en %
+    
+    # Fiscalidad
+    tax_exempt = Column(Boolean, default=False)  # Exento de IVA
+    tax_rate = Column(Numeric(5, 2), default=16.00)  # Tasa IVA aplicable (16%, 8%, 0%)
     
     # WMS Features
     track_batches = Column(Boolean, default=False)
     track_expiry = Column(Boolean, default=False)
-    min_stock = Column(Float, default=0.0)
-    max_stock = Column(Float, default=0.0)
+    min_stock = Column(Numeric(18, 4), default=0.0)
+    max_stock = Column(Numeric(18, 4), default=0.0)
     
     unit_of_measure = Column(String, default="unit") # kg, mt, box, etc
     track_serials = Column(Boolean, default=False)
@@ -104,13 +111,13 @@ class MovementSubtype:
     ADJUSTMENT = "ADJUSTMENT"
     PURCHASE = "PURCHASE"
     SALE = "SALE"
-    TRANSFER = "TRANSFER"   # ← nuevo
+    TRANSFER = "TRANSFER"
     DAMAGE = "DAMAGE"
     RETURN = "RETURN"
     DONATION = "DONATION"
     EXPIRED = "EXPIRED"
     THEFT = "THEFT"
-    DISPATCH = "DISPATCH"   # ← nuevo
+    DISPATCH = "DISPATCH"
     OTHER = "OTHER"
 
 class StockMovement(Base, TimestampMixin, TenantMixin, AuditMixin):
@@ -124,7 +131,7 @@ class StockMovement(Base, TimestampMixin, TenantMixin, AuditMixin):
     
     movement_type = Column(String, nullable=False) # IN, OUT, TRANSFER, ADJUSTMENT
     movement_subtype = Column(String, nullable=True) # CHARGE, DISCHARGE, SALE, PURCHASE, etc.
-    quantity = Column(Float, nullable=False)
+    quantity = Column(Numeric(18, 4), nullable=False)
     reference = Column(String, nullable=True) # Invoice #, Transfer #
     document_number = Column(String, nullable=True) # Physical or system doc number
     notes = Column(String, nullable=True) # Detailed observations
@@ -143,7 +150,7 @@ class StockSummary(Base, TimestampMixin, TenantMixin, AuditMixin):
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False)
     bin_location_id = Column(Integer, ForeignKey("bin_locations.id"), nullable=True)
     batch_id = Column(Integer, ForeignKey("batches.id"), nullable=True)
-    quantity = Column(Float, default=0.0)
+    quantity = Column(Numeric(18, 4), default=0.0)
     
     product = relationship("Product")
     warehouse = relationship("Warehouse")
@@ -167,7 +174,7 @@ class DispatchNoteItem(Base, TimestampMixin, TenantMixin, AuditMixin):
     id = Column(Integer, primary_key=True, index=True)
     dispatch_note_id = Column(Integer, ForeignKey('dispatch_notes.id'), nullable=False)
     product_id = Column(Integer, ForeignKey('products.id'), nullable=False)
-    quantity = Column(Float, nullable=False)
+    quantity = Column(Numeric(18, 4), nullable=False)
     
     dispatch_note = relationship("DispatchNote", back_populates="items")
     product = relationship("Product")
@@ -189,9 +196,9 @@ class InventoryAuditDetail(Base, TimestampMixin, TenantMixin, AuditMixin):
     audit_id = Column(Integer, ForeignKey('inventory_audits.id', ondelete='CASCADE'), nullable=False)
     product_id = Column(Integer, ForeignKey('products.id'), nullable=False)
     
-    expected_quantity = Column(Float, nullable=False, default=0.0) # Theoretical stock
-    counted_quantity = Column(Float, nullable=True) # Actual physical count
-    difference = Column(Float, nullable=True) # counted - expected
+    expected_quantity = Column(Numeric(18, 4), nullable=False, default=0.0) # Theoretical stock
+    counted_quantity = Column(Numeric(18, 4), nullable=True) # Actual physical count
+    difference = Column(Numeric(18, 4), nullable=True) # counted - expected
     
     audit = relationship("InventoryAudit", back_populates="details")
     product = relationship("Product")

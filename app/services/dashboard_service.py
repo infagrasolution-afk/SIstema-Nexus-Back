@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, extract
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.domain.sales import Sale, Customer
 from app.domain.purchases import Purchase
 from app.domain.inventory import Product, StockSummary
@@ -14,7 +14,7 @@ class DashboardService:
         tenant_id: int,
         period: str = "month",  # today | week | month | year | all
     ):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # ── Rango de fechas según el período ──────────────────────────────────
         if period == "today":
@@ -111,22 +111,31 @@ class DashboardService:
             )
         )
 
-        # ── Gráfico de ventas por día (últimos 7 días) ────────────────────────
+        # ── Gráfico de ventas por día (últimos 7 días) — Consulta única agrupada ──────
+        start_7d = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+        chart_result = await db.execute(
+            select(
+                func.date(Sale.created_at).label("sale_date"),
+                func.sum(Sale.total).label("day_total")
+            ).where(
+                Sale.tenant_id == tenant_id,
+                Sale.status == "COMPLETED",
+                Sale.created_at >= start_7d
+            ).group_by(func.date(Sale.created_at))
+        )
+        sales_by_date = {str(row.sale_date): float(row.day_total or 0) for row in chart_result.all()}
+
         sales_chart = []
-        days_labels = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
+        days_labels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
         for i in range(6, -1, -1):
-            day_start = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end = day_start + timedelta(days=1)
-            day_sum = await db.scalar(
-                select(func.sum(Sale.total)).where(
-                    Sale.tenant_id == tenant_id,
-                    Sale.status == "COMPLETED",
-                    Sale.created_at >= day_start,
-                    Sale.created_at < day_end,
-                )
-            )
-            label = days_labels[day_start.weekday() + 1 if day_start.weekday() < 6 else 0]
-            sales_chart.append({"name": label, "fecha": day_start.strftime("%Y-%m-%d"), "ventas": float(day_sum or 0)})
+            day_dt = (now - timedelta(days=i)).date()
+            day_str = day_dt.strftime("%Y-%m-%d")
+            label = days_labels[day_dt.weekday()]
+            sales_chart.append({
+                "name": label,
+                "fecha": day_str,
+                "ventas": sales_by_date.get(day_str, 0.0)
+            })
 
         # ── Top 5 productos más vendidos ──────────────────────────────────────
         from app.domain.sales import SaleDetail

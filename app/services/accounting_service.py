@@ -34,6 +34,14 @@ class AccountingService:
             Account(code="4110", name="Ganancia Cambiaria (Diferencial Cambiario BCV)", type=AccountType.REVENUE, tenant_id=tenant_id),
             Account(code="5202", name="Gastos de IGTF Pagados (3%)", type=AccountType.EXPENSE, tenant_id=tenant_id),
             Account(code="5204", name="Pérdida Cambiaria (Diferencial Cambiario BCV)", type=AccountType.EXPENSE, tenant_id=tenant_id),
+
+            # Cuentas de Nómina y Leyes Laborales (LOTTT / IVSS / BANAVIH)
+            Account(code="2170", name="Retenciones SSO por Enterar (IVSS 4%)", type=AccountType.LIABILITY, tenant_id=tenant_id),
+            Account(code="2171", name="Retenciones FAOV por Enterar (BANAVIH 1%)", type=AccountType.LIABILITY, tenant_id=tenant_id),
+            Account(code="2172", name="Retenciones RPE por Enterar (Paro Forzoso 0.5%)", type=AccountType.LIABILITY, tenant_id=tenant_id),
+            Account(code="2180", name="Sueldos y Salarios por Pagar (Nómina)", type=AccountType.LIABILITY, tenant_id=tenant_id),
+            Account(code="5101", name="Gastos de Sueldos y Salarios (LOTTT)", type=AccountType.EXPENSE, tenant_id=tenant_id),
+            Account(code="5102", name="Gastos de Cestaticket Socialista", type=AccountType.EXPENSE, tenant_id=tenant_id),
         ]
         db.add_all(defaults)
         await db.commit()
@@ -365,3 +373,298 @@ class AccountingService:
             "total_expense": total_expense,
             "net_income": net_income
         }
+
+    @staticmethod
+    async def account_payroll_period(db: AsyncSession, period_id: int, tenant_id: str):
+        """
+        Contabiliza automáticamente un período de nómina cerrado según VEN-NIF:
+        - Débito: Gastos de Sueldos (5101) + Gastos Cestaticket (5102)
+        - Crédito: Retención SSO 4% (2170) + Retención FAOV 1% (2171) + Retención RPE 0.5% (2172) + Sueldos por Pagar (2180)
+        """
+        from app.domain.payroll import PayrollPeriod, PayrollReceipt
+        from sqlalchemy.orm import selectinload
+        from decimal import Decimal
+
+        await AccountingService.init_default_accounts(db, tenant_id)
+
+        stmt = (
+            select(PayrollPeriod)
+            .where(PayrollPeriod.id == period_id, PayrollPeriod.tenant_id == tenant_id)
+            .options(selectinload(PayrollPeriod.receipts))
+        )
+        res = await db.execute(stmt)
+        period = res.scalars().first()
+        if not period or not period.receipts:
+            return None
+
+        # Obtener cuentas contables requeridas
+        acc_stmt = select(Account).where(Account.tenant_id == tenant_id)
+        accounts = (await db.execute(acc_stmt)).scalars().all()
+
+        gasto_sueldos = next((a for a in accounts if a.code == "5101"), None)
+        gasto_cesta = next((a for a in accounts if a.code == "5102"), None)
+        ret_sso = next((a for a in accounts if a.code == "2170"), None)
+        ret_faov = next((a for a in accounts if a.code == "2171"), None)
+        ret_rpe = next((a for a in accounts if a.code == "2172"), None)
+        sueldos_pagar = next((a for a in accounts if a.code == "2180"), None)
+
+        if not all([gasto_sueldos, gasto_cesta, ret_sso, ret_faov, ret_rpe, sueldos_pagar]):
+            # Si alguna cuenta falta, usamos cuentas padre
+            gastos_gen = next((a for a in accounts if a.code == "5000"), None)
+            pasivos_gen = next((a for a in accounts if a.code == "2000"), None)
+            gasto_sueldos = gasto_sueldos or gastos_gen
+            gasto_cesta = gasto_cesta or gastos_gen
+            ret_sso = ret_sso or pasivos_gen
+            ret_faov = ret_faov or pasivos_gen
+            ret_rpe = ret_rpe or pasivos_gen
+            sueldos_pagar = sueldos_pagar or pasivos_gen
+
+        tot_salarios = sum(Decimal(str(r.base_salary_ves or 0)) for r in period.receipts)
+        tot_cesta = sum(Decimal(str(r.cestaticket_ves or 0)) for r in period.receipts)
+        tot_sso = sum(Decimal(str(r.sso_deduction_ves or 0)) for r in period.receipts)
+        tot_faov = sum(Decimal(str(r.faov_deduction_ves or 0)) for r in period.receipts)
+        tot_rpe = sum(Decimal(str(r.rpe_deduction_ves or 0)) for r in period.receipts)
+        tot_neto = sum(Decimal(str(r.net_amount_ves or 0)) for r in period.receipts)
+
+        je = JournalEntry(
+            reference=f"NOM-{period.code}",
+            description=f"Contabilización de Nómina Período: {period.name} ({len(period.receipts)} trabajadores)",
+            currency="VES",
+            exchange_rate=period.exchange_rate,
+            tenant_id=tenant_id
+        )
+        db.add(je)
+        await db.flush()
+
+        # DÉBITOS (Gastos)
+        if tot_salarios > Decimal('0'):
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=gasto_sueldos.id, debit=tot_salarios, credit=Decimal('0'), tenant_id=tenant_id))
+            gasto_sueldos.balance += tot_salarios
+
+        if tot_cesta > Decimal('0'):
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=gasto_cesta.id, debit=tot_cesta, credit=Decimal('0'), tenant_id=tenant_id))
+            gasto_cesta.balance += tot_cesta
+
+        # CRÉDITOS (Retenciones de Ley y Neto por Pagar)
+        if tot_sso > Decimal('0'):
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=ret_sso.id, debit=Decimal('0'), credit=tot_sso, tenant_id=tenant_id))
+            ret_sso.balance += tot_sso
+
+        if tot_faov > Decimal('0'):
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=ret_faov.id, debit=Decimal('0'), credit=tot_faov, tenant_id=tenant_id))
+            ret_faov.balance += tot_faov
+
+        if tot_rpe > Decimal('0'):
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=ret_rpe.id, debit=Decimal('0'), credit=tot_rpe, tenant_id=tenant_id))
+            ret_rpe.balance += tot_rpe
+
+        if tot_neto > Decimal('0'):
+            db.add(JournalEntryDetail(journal_entry_id=je.id, account_id=sueldos_pagar.id, debit=Decimal('0'), credit=tot_neto, tenant_id=tenant_id))
+            sueldos_pagar.balance += tot_neto
+
+        await db.flush()
+        return je
+
+    @staticmethod
+    async def get_trial_balance(db: AsyncSession, tenant_id: str):
+        """
+        Genera el Balance de Comprobación de Sumas y Saldos (Trial Balance) según VEN-NIF.
+        Calcula Suma Débitos, Suma Créditos, Saldo Deudor y Saldo Acreedor por cuenta.
+        """
+        from sqlalchemy import func
+        await AccountingService.init_default_accounts(db, tenant_id)
+
+        # Consultar todas las cuentas activas
+        stmt = select(Account).where(Account.tenant_id == tenant_id, Account.is_active == True).order_by(Account.code.asc())
+        accounts = (await db.execute(stmt)).scalars().all()
+
+        # Consultar sumas acumuladas de débitos y créditos en JournalEntryDetail
+        detail_stmt = (
+            select(
+                JournalEntryDetail.account_id,
+                func.sum(JournalEntryDetail.debit).label("total_debit"),
+                func.sum(JournalEntryDetail.credit).label("total_credit")
+            )
+            .join(JournalEntry, JournalEntry.id == JournalEntryDetail.journal_entry_id)
+            .where(
+                JournalEntryDetail.tenant_id == tenant_id,
+                JournalEntry.status == "POSTED"
+            )
+            .group_by(JournalEntryDetail.account_id)
+        )
+        detail_res = await db.execute(detail_stmt)
+        sums_by_account = {row[0]: (row[1] or Decimal('0'), row[2] or Decimal('0')) for row in detail_res.all()}
+
+        rows = []
+        sum_total_debit = Decimal('0')
+        sum_total_credit = Decimal('0')
+        sum_saldo_deudor = Decimal('0')
+        sum_saldo_acreedor = Decimal('0')
+
+        for acc in accounts:
+            tot_deb, tot_cred = sums_by_account.get(acc.id, (Decimal('0'), Decimal('0')))
+            diff = tot_deb - tot_cred
+
+            # En VEN-NIF: Activos y Gastos son de naturaleza deudora; Pasivos, Capital e Ingresos son de naturaleza acreedora
+            if diff >= Decimal('0'):
+                saldo_deudor = diff
+                saldo_acreedor = Decimal('0')
+            else:
+                saldo_deudor = Decimal('0')
+                saldo_acreedor = abs(diff)
+
+            sum_total_debit += tot_deb
+            sum_total_credit += tot_cred
+            sum_saldo_deudor += saldo_deudor
+            sum_saldo_acreedor += saldo_acreedor
+
+            rows.append({
+                "account_id": acc.id,
+                "code": acc.code,
+                "name": acc.name,
+                "type": acc.type,
+                "total_debit": float(tot_deb),
+                "total_credit": float(tot_cred),
+                "debit_balance": float(saldo_deudor),
+                "credit_balance": float(saldo_acreedor)
+            })
+
+        is_balanced = abs(sum_total_debit - sum_total_credit) < Decimal('0.01') and abs(sum_saldo_deudor - sum_saldo_acreedor) < Decimal('0.01')
+
+        return {
+            "rows": rows,
+            "total_debit_sum": float(sum_total_debit),
+            "total_credit_sum": float(sum_total_credit),
+            "total_debit_balance": float(sum_saldo_deudor),
+            "total_credit_balance": float(sum_saldo_acreedor),
+            "is_balanced": is_balanced
+        }
+
+    @staticmethod
+    async def get_balance_sheet(db: AsyncSession, tenant_id: str):
+        """
+        Genera el Estado de Situación Financiera (Balance General) VEN-NIF.
+        Ecuación: Activo = Pasivo + Patrimonio + Utilidad del Ejercicio
+        """
+        await AccountingService.init_default_accounts(db, tenant_id)
+
+        stmt = select(Account).where(Account.tenant_id == tenant_id, Account.is_active == True).order_by(Account.code.asc())
+        accounts = (await db.execute(stmt)).scalars().all()
+
+        assets = []
+        liabilities = []
+        equity = []
+        total_assets = Decimal('0')
+        total_liabilities = Decimal('0')
+        total_equity = Decimal('0')
+
+        # Primero obtenemos el P&L actual para incorporar la utilidad neta no cerrada
+        pnl = await AccountingService.get_pnl(db, tenant_id)
+        current_year_earnings = Decimal(str(pnl.get("net_income", 0)))
+
+        for acc in accounts:
+            bal = Decimal(str(acc.balance or 0))
+            item = {"code": acc.code, "name": acc.name, "balance": float(bal)}
+
+            if acc.type == AccountType.ASSET:
+                assets.append(item)
+                total_assets += bal
+            elif acc.type == AccountType.LIABILITY:
+                liabilities.append(item)
+                total_liabilities += bal
+            elif acc.type == AccountType.EQUITY:
+                equity.append(item)
+                total_equity += bal
+
+        total_equity_with_earnings = total_equity + current_year_earnings
+        total_liab_plus_equity = total_liabilities + total_equity_with_earnings
+        equation_balanced = abs(total_assets - total_liab_plus_equity) < Decimal('0.01')
+
+        return {
+            "assets": assets,
+            "liabilities": liabilities,
+            "equity": equity,
+            "current_year_earnings": float(current_year_earnings),
+            "total_assets": float(total_assets),
+            "total_liabilities": float(total_liabilities),
+            "total_equity": float(total_equity),
+            "total_liabilities_and_equity": float(total_liab_plus_equity),
+            "equation_balanced": equation_balanced
+        }
+
+    @staticmethod
+    async def close_fiscal_year(db: AsyncSession, year: int, tenant_id: str):
+        """
+        Ejecuta el Asiento de Cierre de Ejercicio Económico (Refundición de Cuentas Nominales):
+        - Cancela todos los Ingresos (4xxx) debitándolos.
+        - Cancela todos los Gastos/Costos (5xxx) acreditándolos.
+        - Transfiere el resultado neto a la cuenta de Patrimonio '3201 - Resultado del Ejercicio'.
+        """
+        await AccountingService.init_default_accounts(db, tenant_id)
+
+        # Buscar o crear cuenta de Resultados del Ejercicio (3201)
+        acc_stmt = select(Account).where(Account.tenant_id == tenant_id)
+        accounts = (await db.execute(acc_stmt)).scalars().all()
+
+        res_account = next((a for a in accounts if a.code == "3201"), None)
+        if not res_account:
+            res_account = Account(
+                code="3201",
+                name="Resultados del Ejercicio Económico (Superávit/Déficit)",
+                type=AccountType.EQUITY,
+                balance=Decimal('0.0000'),
+                tenant_id=tenant_id
+            )
+            db.add(res_account)
+            await db.flush()
+
+        # Obtener cuentas de Ingresos y Gastos con saldo
+        rev_exp_accounts = [a for a in accounts if a.type in (AccountType.REVENUE, AccountType.EXPENSE) and a.balance != Decimal('0')]
+        if not rev_exp_accounts:
+            return {"message": f"No hay saldos en cuentas nominales para cerrar el ejercicio {year}."}
+
+        total_rev = Decimal('0')
+        total_exp = Decimal('0')
+
+        closing_je = JournalEntry(
+            reference=f"CIERRE-{year}",
+            description=f"Asiento de Cierre de Cuentas Nominales del Ejercicio Fiscal {year}",
+            currency="USD",
+            exchange_rate=Decimal('1.0000'),
+            tenant_id=tenant_id
+        )
+        db.add(closing_je)
+        await db.flush()
+
+        for a in rev_exp_accounts:
+            bal = a.balance
+            if a.type == AccountType.REVENUE:
+                # Cancelar ingreso (débito)
+                db.add(JournalEntryDetail(journal_entry_id=closing_je.id, account_id=a.id, debit=bal, credit=Decimal('0'), tenant_id=tenant_id))
+                total_rev += bal
+                a.balance = Decimal('0.0000')
+            elif a.type == AccountType.EXPENSE:
+                # Cancelar gasto (crédito)
+                db.add(JournalEntryDetail(journal_entry_id=closing_je.id, account_id=a.id, debit=Decimal('0'), credit=bal, tenant_id=tenant_id))
+                total_exp += bal
+                a.balance = Decimal('0.0000')
+
+        net_result = total_rev - total_exp
+        if net_result > Decimal('0'):
+            # Ganancia neta -> Crédito a Resultados del Ejercicio
+            db.add(JournalEntryDetail(journal_entry_id=closing_je.id, account_id=res_account.id, debit=Decimal('0'), credit=net_result, tenant_id=tenant_id))
+            res_account.balance += net_result
+        elif net_result < Decimal('0'):
+            # Pérdida neta -> Débito a Resultados del Ejercicio
+            db.add(JournalEntryDetail(journal_entry_id=closing_je.id, account_id=res_account.id, debit=abs(net_result), credit=Decimal('0'), tenant_id=tenant_id))
+            res_account.balance -= abs(net_result)
+
+        await db.commit()
+        return {
+            "message": f"Ejercicio fiscal {year} cerrado exitosamente.",
+            "closing_journal_entry_id": closing_je.id,
+            "total_revenues_closed": float(total_rev),
+            "total_expenses_closed": float(total_exp),
+            "net_result": float(net_result)
+        }
+

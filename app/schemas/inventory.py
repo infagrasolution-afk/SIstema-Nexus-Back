@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import datetime
+from decimal import Decimal
 
 # --- Bins ---
 class BinLocationBase(BaseModel):
@@ -36,33 +37,57 @@ class ProductBase(BaseModel):
     name: str
     description: Optional[str] = None
     sku: str
-    price: float
-    cost: float = 0.0
-    average_cost: float = 0.0
+    barcode: Optional[str] = None
+    price: Decimal
+    cost: Decimal = Decimal('0.0000')
+    average_cost: Decimal = Decimal('0.0000')
+    tax_exempt: bool = False
+    tax_rate: Decimal = Decimal('16.0000')
+    margin_percent: Decimal = Decimal('30.0000')
     
     # WMS Fields
     track_batches: bool = False
     track_expiry: bool = False
-    min_stock: float = 0.0
-    max_stock: float = 0.0
+    min_stock: Decimal = Decimal('0.0000')
+    max_stock: Decimal = Decimal('0.0000')
     unit_of_measure: str = "unit"
     image_url: Optional[str] = None
 
 class ProductCreate(ProductBase):
     category_id: Optional[int] = None
 
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    sku: Optional[str] = None
+    barcode: Optional[str] = None
+    price: Optional[Decimal] = None
+    cost: Optional[Decimal] = None
+    average_cost: Optional[Decimal] = None
+    tax_exempt: Optional[bool] = None
+    tax_rate: Optional[Decimal] = None
+    margin_percent: Optional[Decimal] = None
+    track_batches: Optional[bool] = None
+    track_expiry: Optional[bool] = None
+    min_stock: Optional[Decimal] = None
+    max_stock: Optional[Decimal] = None
+    unit_of_measure: Optional[str] = None
+    image_url: Optional[str] = None
+    category_id: Optional[int] = None
+
 class ProductResponse(ProductBase):
     id: int
     tenant_id: int
-    stock: float = 0.0
+    category_id: Optional[int] = None
+    stock: Decimal = Decimal('0.0000')
     model_config = ConfigDict(from_attributes=True)
 
 class InitialStockImport(BaseModel):
     sku: str
     name: str
-    cost: float = 0.0
-    price: float = 0.0
-    quantity: float
+    cost: Decimal = Decimal('0.0000')
+    price: Decimal = Decimal('0.0000')
+    quantity: Decimal
     warehouse_id: int
 
 # --- Warehouses ---
@@ -86,9 +111,9 @@ class StockAdjustmentBase(BaseModel):
     warehouse_id: int
     bin_location_id: Optional[int] = None
     batch_id: Optional[int] = None
-    quantity: float
+    quantity: Decimal
     reference: Optional[str] = "Manual Adjustment"
-    unit_cost: Optional[float] = None # For calculating average cost if it's an IN adjustment
+    unit_cost: Optional[Decimal] = None
 
 class StockAdjustmentCreate(StockAdjustmentBase):
     pass
@@ -98,18 +123,18 @@ class StockChargeCreate(BaseModel):
     warehouse_id: int
     bin_location_id: Optional[int] = None
     batch_id: Optional[int] = None
-    quantity: float
+    quantity: Decimal
     reference: Optional[str] = None
     document_number: Optional[str] = None
     notes: Optional[str] = None
-    unit_cost: Optional[float] = None
+    unit_cost: Optional[Decimal] = None
 
 class StockDischargeCreate(BaseModel):
     product_id: int
     warehouse_id: int
     bin_location_id: Optional[int] = None
     batch_id: Optional[int] = None
-    quantity: float
+    quantity: Decimal
     reference: Optional[str] = None
     document_number: Optional[str] = None
     notes: Optional[str] = None
@@ -121,13 +146,12 @@ class StockMovementResponse(BaseModel):
     warehouse_id: int
     movement_type: str
     movement_subtype: Optional[str] = None
-    quantity: float
+    quantity: Decimal
     reference: Optional[str] = None
     document_number: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime
     
-    # Optional nested info
     product: Optional[ProductResponse] = None
     warehouse: Optional[WarehouseResponse] = None
     
@@ -136,7 +160,7 @@ class StockMovementResponse(BaseModel):
 # --- Dispatch Notes ---
 class DispatchNoteItemBase(BaseModel):
     product_id: int
-    quantity: float
+    quantity: Decimal
 
 class DispatchNoteItemCreate(DispatchNoteItemBase):
     pass
@@ -166,13 +190,13 @@ class DispatchNoteResponse(DispatchNoteBase):
 # --- Inventory Audits ---
 class InventoryAuditDetailBase(BaseModel):
     product_id: int
-    expected_quantity: float = 0.0
-    counted_quantity: Optional[float] = None
-    difference: Optional[float] = None
+    expected_quantity: Decimal = Decimal('0.0000')
+    counted_quantity: Optional[Decimal] = None
+    difference: Optional[Decimal] = None
 
 class InventoryAuditDetailCreate(BaseModel):
     product_id: int
-    counted_quantity: float
+    counted_quantity: Decimal
 
 class InventoryAuditDetailResponse(InventoryAuditDetailBase):
     id: int

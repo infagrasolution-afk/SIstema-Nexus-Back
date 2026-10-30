@@ -82,6 +82,38 @@ async def get_pnl_report(
 ):
     return await AccountingService.get_pnl(db, current_user.tenant_id)
 
+@router.get("/trial-balance")
+async def get_trial_balance(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    _: bool = Depends(require_module("accounting")),
+):
+    """Genera el Balance de Comprobación de Sumas y Saldos VEN-NIF."""
+    return await AccountingService.get_trial_balance(db, current_user.tenant_id)
+
+@router.get("/balance-sheet")
+async def get_balance_sheet(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    _: bool = Depends(require_module("accounting")),
+):
+    """Genera el Estado de Situación Financiera (Balance General) VEN-NIF."""
+    return await AccountingService.get_balance_sheet(db, current_user.tenant_id)
+
+@router.post("/year-end-closing")
+async def close_fiscal_year(
+    year: int,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    _: bool = Depends(require_module("accounting")),
+):
+    """Ejecuta el asiento de cierre de cuentas nominales de ejercicio fiscal."""
+    try:
+        return await AccountingService.close_fiscal_year(db, year, current_user.tenant_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # --- Bank Reconciliation ---
 from app.domain.accounting import BankStatement, BankStatementLine, JournalEntryDetail
 from app.schemas.accounting import BankStatementCreate, BankStatementResponse, BankStatementLineCreate, BankStatementLineResponse

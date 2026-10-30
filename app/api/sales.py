@@ -4,11 +4,17 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import select, or_
 from typing import List, Optional
 from datetime import datetime
+from decimal import Decimal
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from app.services.sales_service import SalesService
 from app.services.pdf_service import PDFService
-from app.schemas.sales import SaleCreate, SaleResponse, BudgetCreate, BudgetResponse, CustomerCreate, CustomerResponse, CustomerUpdate, DebitNoteCreate, DebitNoteResponse
-from app.domain.sales import Sale, Budget, Customer
+from app.schemas.sales import (
+    SaleCreate, SaleResponse, BudgetCreate, BudgetResponse,
+    CustomerCreate, CustomerResponse, CustomerUpdate,
+    DebitNoteCreate, DebitNoteResponse,
+    CreditNoteCreate, CreditNoteResponse
+)
+from app.domain.sales import Sale, Budget, Customer, CreditNote, CreditNoteItem
 from app.domain.accounting import DebitNote
 from app.domain.tenant import Tenant
 from app.domain.user import User
@@ -182,17 +188,17 @@ async def cancel_sale(
     prev_status = sale.status
     sale.status = "CANCELLED"
 
-    # Si estaba completada, revertir inventario (requiere warehouse info)
-    # La reversión se hace como un CHARGE (entrada de inventario) en cada detalle
+    # Si estaba completada, revertir inventario en el almacén de origen de la venta
     if prev_status == "COMPLETED":
         from app.services.wms_service import WMSService
         from app.domain.inventory import MovementType, MovementSubtype
+        target_warehouse_id = sale.warehouse_id or 1
         for detail in sale.details:
             try:
                 await WMSService.register_movement(
                     db=db,
                     product_id=detail.product_id,
-                    warehouse_id=1,  # Default warehouse - ideally stored per sale
+                    warehouse_id=target_warehouse_id,
                     movement_type=MovementType.IN,
                     movement_subtype=MovementSubtype.ADJUSTMENT,
                     quantity=detail.quantity,
@@ -201,8 +207,11 @@ async def cancel_sale(
                     user_id=current_user.id,
                     user_name=current_user.username,
                 )
-            except Exception:
-                pass  # Si el producto ya no existe, se registra igualmente
+            except Exception as e:
+                import logging
+                logging.getLogger("nexus.sales").error(
+                    f"Error revirtiendo inventario para producto {detail.product_id} en venta #{sale.id}: {e}"
+                )
 
     await db.commit()
     return {"status": "success", "message": f"Venta #{sale_id} cancelada", "reverted_inventory": prev_status == "COMPLETED"}
@@ -227,6 +236,30 @@ async def get_sale_invoice(
         content=pdf_buffer.getvalue(),
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=invoice_{sale_id}.pdf"}
+    )
+
+@router.get("/{sale_id}/ticket")
+async def get_sale_ticket(
+    sale_id: int,
+    width: int = 80,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant)
+):
+    """Genera el Ticket Térmico de Venta para impresoras POS de 80mm o 58mm."""
+    result = await db.execute(
+        select(Sale)
+        .where(Sale.id == sale_id, Sale.tenant_id == tenant_id)
+        .options(selectinload(Sale.details), selectinload(Sale.customer), selectinload(Sale.tenant))
+    )
+    sale = result.scalars().first()
+    if not sale:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+
+    pdf_buffer = PDFService.generate_thermal_ticket(sale, width_mm=width)
+    return Response(
+        content=pdf_buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=ticket_{sale_id}.pdf"}
     )
 
 @router.get("/budgets", response_model=list[BudgetResponse])
@@ -492,3 +525,163 @@ async def create_commercial_note(
         print(f"Error contabilizando nota comercial: {e}")
 
     return new_note
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Notas de Crédito Fiscales (SENIAT) con Items y Devolución a Inventario
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/credit-notes", response_model=CreditNoteResponse)
+async def create_credit_note(
+    note_in: CreditNoteCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_module("sales"))
+):
+    """
+    Crea una Nota de Crédito fiscal formal vinculada a una Factura de Venta.
+    - Soporta desglose por ítems devueltos/acreditados
+    - Si restock_inventory es True, reingresa los productos al almacén de la venta
+    - Disminuye el saldo pendiente en Cuentas por Cobrar (CxC)
+    - Registra el número de control fiscal SENIAT
+    """
+    # 1. Validar que la venta exista y pertenezca al tenant
+    sale_stmt = select(Sale).where(Sale.id == note_in.sale_id, Sale.tenant_id == tenant_id)
+    sale_res = await db.execute(sale_stmt)
+    sale = sale_res.scalars().first()
+    if not sale:
+        raise HTTPException(status_code=404, detail="Factura de venta original no encontrada")
+
+    # 2. Generar número correlativo de Nota de Crédito
+    count_stmt = select(func.count(CreditNote.id)).where(CreditNote.tenant_id == tenant_id)
+    count_res = await db.execute(count_stmt)
+    total_cn = count_res.scalar() or 0
+    generated_number = f"NC-{total_cn + 1:06d}"
+
+    # 3. Crear cabecera de Nota de Crédito
+    credit_note = CreditNote(
+        number=generated_number,
+        control_number=note_in.control_number,
+        sale_id=sale.id,
+        customer_id=note_in.customer_id,
+        reason=note_in.reason,
+        currency=note_in.currency or sale.currency,
+        exchange_rate=note_in.exchange_rate or sale.exchange_rate,
+        subtotal=note_in.subtotal,
+        tax_total=note_in.tax_total,
+        total=note_in.total,
+        status="APPROVED",
+        notes=note_in.notes,
+        tenant_id=tenant_id,
+        created_by_id=current_user.id,
+        created_by_name=current_user.username
+    )
+    db.add(credit_note)
+    await db.flush()  # Para obtener el ID
+
+    # 4. Crear los ítems de la nota de crédito y reingresar stock si corresponde
+    from app.services.wms_service import WMSService
+    from app.domain.inventory import MovementType, MovementSubtype
+    target_wh = sale.warehouse_id or 1
+
+    for item in note_in.items:
+        cn_item = CreditNoteItem(
+            credit_note_id=credit_note.id,
+            product_id=item.product_id,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            subtotal=item.subtotal,
+            tax_rate=item.tax_rate or Decimal('16.0000'),
+            tax_amount=item.tax_amount or Decimal('0.0000'),
+            total=item.total,
+            tenant_id=tenant_id
+        )
+        db.add(cn_item)
+
+        if note_in.restock_inventory and item.quantity > 0:
+            try:
+                await WMSService.register_movement(
+                    db=db,
+                    product_id=item.product_id,
+                    warehouse_id=target_wh,
+                    movement_type=MovementType.IN,
+                    movement_subtype=MovementSubtype.ADJUSTMENT,
+                    quantity=item.quantity,
+                    reference=f"Reingreso por {generated_number} (Factura #{sale.id:06d})",
+                    tenant_id=tenant_id,
+                    user_id=current_user.id,
+                    user_name=current_user.username,
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger("nexus.sales").error(
+                    f"Error reingresando stock para ítem {item.product_id} en NC {generated_number}: {e}"
+                )
+
+    # 5. Descontar saldo en Cuentas por Cobrar (CxC) si existe registro
+    from app.domain.treasury import AccountsReceivable
+    ar_stmt = select(AccountsReceivable).where(
+        AccountsReceivable.sale_id == sale.id,
+        AccountsReceivable.tenant_id == tenant_id
+    )
+    ar_res = await db.execute(ar_stmt)
+    ar_record = ar_res.scalars().first()
+    if ar_record:
+        ar_record.remaining_amount -= note_in.total
+        if ar_record.remaining_amount <= 0:
+            ar_record.remaining_amount = Decimal('0.0000')
+            ar_record.status = 'PAID'
+        elif ar_record.remaining_amount < ar_record.total_amount:
+            ar_record.status = 'PARTIAL'
+
+    await db.commit()
+    
+    # Recargar con items
+    full_stmt = select(CreditNote).where(CreditNote.id == credit_note.id).options(selectinload(CreditNote.items))
+    final_res = await db.execute(full_stmt)
+    return final_res.scalars().first()
+
+
+@router.get("/credit-notes", response_model=List[CreditNoteResponse])
+async def list_credit_notes(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    customer_id: Optional[int] = Query(None),
+    limit: int = Query(100, le=500),
+    offset: int = Query(0),
+    _: bool = Depends(require_module("sales"))
+):
+    """Lista las Notas de Crédito emitidas por la empresa."""
+    stmt = (
+        select(CreditNote)
+        .where(CreditNote.tenant_id == tenant_id)
+        .options(selectinload(CreditNote.items))
+        .order_by(CreditNote.created_at.desc())
+    )
+    if customer_id:
+        stmt = stmt.where(CreditNote.customer_id == customer_id)
+    stmt = stmt.limit(limit).offset(offset)
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+@router.get("/credit-notes/{note_id}", response_model=CreditNoteResponse)
+async def get_credit_note_detail(
+    note_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("sales"))
+):
+    """Detalle completo de una Nota de Crédito."""
+    stmt = (
+        select(CreditNote)
+        .where(CreditNote.id == note_id, CreditNote.tenant_id == tenant_id)
+        .options(selectinload(CreditNote.items))
+    )
+    res = await db.execute(stmt)
+    note = res.scalars().first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Nota de crédito no encontrada")
+    return note
+
