@@ -5,20 +5,34 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "ERP Multi-Tenant API"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
-    
-    # Postgres Connection String from Render
-    # En Render: configura DATABASE_URL en las variables de entorno del servicio
-    DATABASE_URL: str = "postgresql://admin:rvham9UEK8B8yhvKcRYk42BuMNrCaeVn@dpg-d95fdt5ckfvc73ba7d9g-a.virginia-postgres.render.com/erp_db_qoj0"
+
+    # PostgreSQL Connection String - Neon.tech (Free, no expiration)
+    # En Render: sobreescribir con variable de entorno DATABASE_URL
+    # IMPORTANTE: en el campo "Value" de Render pegar SOLO la URL, sin "DATABASE_URL="
+    DATABASE_URL: str = "postgresql://neondb_owner:npg_I0Mxlav1AwqY@ep-mute-leaf-b5kmmegr-pooler.c-7.us-east-2.aws.neon.tech/neondb"
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def clean_database_url(cls, v: str) -> str:
+        """Remove a leading 'DATABASE_URL=' if the value was pasted incorrectly in Render."""
+        if v.startswith("DATABASE_URL="):
+            return v.split("=", 1)[1]
+        return v
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
         url = self.DATABASE_URL
+        # Normalizar esquema para asyncpg
         if url.startswith("postgresql://") and "asyncpg" not in url:
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgres://") and "asyncpg" not in url:
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        if "render.com" in url and "ssl=require" not in url:
+        # Forzar SSL para Render y Neon
+        needs_ssl = ("render.com" in url or "neon.tech" in url)
+        if needs_ssl and "ssl=require" not in url:
             url += "&ssl=require" if "?" in url else "?ssl=require"
+        # Quitar channel_binding (no soportado por asyncpg)
+        url = url.replace("&channel_binding=require", "").replace("?channel_binding=require&", "?").replace("?channel_binding=require", "")
         return url
 
     # JWT
@@ -36,7 +50,7 @@ class Settings(BaseSettings):
         if v == "supersecretkey_change_me_in_production":
             import warnings
             warnings.warn(
-                "⚠️  ADVERTENCIA: SECRET_KEY usa el valor por defecto inseguro. "
+                "ADVERTENCIA: SECRET_KEY usa el valor por defecto inseguro. "
                 "Configura la variable de entorno SECRET_KEY en Render.",
                 stacklevel=2
             )
