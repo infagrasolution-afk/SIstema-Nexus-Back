@@ -86,4 +86,3 @@ async def init_tenant_db(tenant_id: int, company_name: str):
 
 # Late import to avoid circular dependency, registering AppErrorLog in metadata
 from app.domain.error_log import AppErrorLog
-
