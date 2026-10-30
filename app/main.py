@@ -36,16 +36,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS config
+# CORS config - Permite peticiones desde el frontend en Render y cualquier dominio/puerto
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS.split(",") if settings.ALLOWED_ORIGINS != "*" else ["*"],
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
-# Professional Security Headers Middleware
+# Professional Security Headers Middleware (solo para cabeceras que no interfieren con API REST)
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -53,8 +54,6 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none';"
     return response
 
 # Create static directory if not exists
@@ -63,9 +62,22 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    origin = request.headers.get("origin") or "*"
+    headers = {
+        "Access-Control-Allow-Origin": origin if origin != "*" else "*",
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+    }
+    error_msg = str(exc)
+    if "connection was closed" in error_msg or "ConnectionDoesNotExist" in error_msg:
+        detail_msg = "Error de conexión con la base de datos PostgreSQL. La base de datos en Render puede estar suspendida o reiniciándose."
+    else:
+        detail_msg = "Error interno del servidor"
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal Server Error", "message": str(exc)},
+        content={"detail": detail_msg, "message": error_msg},
+        headers=headers,
     )
 
 @app.get("/")
