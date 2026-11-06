@@ -6,99 +6,82 @@ import io
 
 router = APIRouter()
 
-MANUAL_TEXT_ES = """# 📘 MANUAL DE USUARIO OFICIAL — APEX ERP VENEZUELA
+MANUAL_TEXT_ES = """# 📘 MANUAL DE USUARIO OFICIAL — APEX ERP
 
-Bienvenido al manual oficial de operaciones de **APEX ERP**, el sistema de gestión integrada y adaptada a la normativa legal, fiscal y comercial de Venezuela. Este documento le guiará a través del uso y mejores prácticas de cada módulo del sistema.
+**Desarrollado por:** InfaGraSolution  
+**Director de Sistemas / Soporte:** Luis Infante  
+**Teléfono / WhatsApp:** 0412-0161906  
+**Correo Electrónico:** infagrasolution@gmail.com  
+**Versión:** 2.0 Enterprise Cloud Multi-Tenant Adaptado a Venezuela  
 
 ---
 
-## 🔒 1. Control de Acceso y Seguridad de Sesión
-
-### A. Acceso Seguro al Portal
-1. Ingrese su **Nombre de Usuario** y su **Contraseña** en la pantalla principal.
-2. Presione **Login** en el botón de color azul zafiro.
-3. Al ingresar, se iniciará automáticamente el **Asistente Guiado (Wizard)** que le enseñará el funcionamiento básico paso a paso.
-
-### B. Políticas de Bloqueo de Cuentas (Protección Antihackeo)
-* **Intentos Fallidos Permitidos:** 3 intentos.
-* **Bloqueo Operativo:** Al tercer intento fallido, la cuenta se bloquea por seguridad. Solicite al Administrador de su empresa que desbloquee la cuenta desde el panel de **Usuarios**.
-* **Bloqueo del Administrador:** Si la cuenta del Administrador se bloquea, aparecerá una alerta de color rojo con un enlace directo a Soporte Técnico vía WhatsApp o al número **0412-0161906** para restablecer la contraseña de forma segura.
+## 🔒 1. Control de Acceso, Usuarios y Seguridad
+1. **Acceso al Portal:** Ingrese su Nombre de Usuario o Correo y su Contraseña en la pantalla de inicio de sesión.
+2. **Políticas Antihackeo:** Dispone de un máximo de 3 intentos consecutivos. Al tercer intento fallido, la cuenta se bloqueará por seguridad. El Administrador puede desbloquearla desde el panel de Usuarios.
+3. **Soporte de Emergencia:** Si el Administrador bloquea su cuenta, contacte a **InfaGraSolution (Luis Infante al 0412-0161906 o infagrasolution@gmail.com)**.
 
 ---
 
 ## 📦 2. Módulo de Inventario y Almacenes (WMS)
-
-El módulo de Inventario centraliza el control físico y el valor monetario de toda la mercancía en tiempo real.
-
-### A. Registro de Productos en el Catálogo
-1. Diríjase a **Inventario > Catálogo**.
-2. Presione el botón **Nuevo Producto**.
-3. Ingrese los datos del SKU (Código único), descripción, precio base de venta y límites de stock (mínimos/máximos).
-4. El sistema calculará el Costo Promedio Ponderado con cada nueva entrada comercial.
-
-### B. Cargos y Descargos Físicos
-* **Cargos (Ingresos manuales):** Permite ingresar existencias físicas al inventario (ejemplo: saldos iniciales, cuadres de auditoría).
-* **Descargos (Salidas manuales):** Registra el retiro inmediato de mercancía justificando mermas, pérdidas o donaciones, descontando stock al instante.
+* **Catálogo de Productos:** SKU único, código de barras EAN/UPC para lectores ópticos, fotografía del producto, categoría y cálculo de margen de ganancia.
+* **Control de Stock Mínimo (Alarma de Stop):** El sistema alerta dinámicamente en el Dashboard cuando el inventario llega a niveles de reposición para evitar quiebres.
+* **Productos a Granel:** Soporte para unidades de medida en kilogramos (`kg`), gramos (`gr`), metros (`mt`), litros (`lt`) con precisión de hasta 4 decimales (`1.450 kg`).
+* **Multi-Almacén:** Gestión del Depósito Principal y Depósitos Externos (1, 2, etc.) con inventarios independientes.
+* **Ubicaciones (Bin Locations):** Organización por Pasillo, Estante y Casillero con generación e impresión de etiquetas QR.
+* **Movimientos Físicos:** Cargos (entradas manuales), Descargos (mermas/salidas) y Ajustes.
+* **Transferencias y Notas de Despacho:** Traslados entre almacenes con emisión de Notas de Despacho en PDF.
+* **Auditorías Físicas:** Conteo ciego vs. teórico y reporte de discrepancias.
+* **Costo Promedio Ponderado:** Recálculo automático con cada recepción de compra.
+* **Carga Masiva CSV:** Importación de catálogo y existencias iniciales mediante plantilla Excel en formato CSV.
 
 ---
 
-## 🛒 3. Módulo de Ventas y Facturación (POS)
-
-El Punto de Venta (POS) permite procesar facturas y cobros de manera ágil y dinámica en Bolívares y Divisas.
-
-### A. Gestión de Caja
-1. **Apertura de Caja:** Antes de vender, acceda a **Caja > Abrir Caja** e ingrese el saldo inicial físico disponible en Bs. y USD para cambio.
-2. **Cierre de Caja:** Al terminar el turno, acceda a **Caja > Cierre de Caja** e ingrese el conteo físico recaudado para compararlo contra los totales de venta.
-
-### B. Proceso de Venta
-1. Vaya a **Ventas > Nueva Venta** (o el botón de POS).
-2. Seleccione el cliente (o use Consumidor Final).
-3. Busque y agregue los productos indicando cantidades.
-4. Presione **Procesar Pago** y elija los métodos de pago (Efectivo, Pago Móvil, Punto de Venta o Divisas) y la moneda.
+## 🛒 3. Módulo de Ventas, Facturación y POS
+* **Directorio de Clientes:** RIF/Cédula, dirección, teléfonos, límite de crédito en USD y días de crédito.
+* **Punto de Venta (POS) Táctil:** Facturación rápida con teclado táctil y escaneo de códigos de barra USB/Bluetooth.
+* **Gestión de Caja:** Aperturas con saldo inicial (Bs. y USD), cobros multimoneda combinados (Efectivo Bs/USD, Pago Móvil, Punto de Venta, Zelle, Crédito), cálculo automático de vueltos y arqueo de cierre con reporte de diferencias.
+* **Impresoras Térmicas y Fiscales:** Compatible con impresoras térmicas de 58mm y 80mm, e impresoras fiscales homologadas por el SENIAT (**The Factory HKA, Bematech, Aclas**) vía agente local en puerto 8080.
+* **Facturación en Forma Libre:** Facturación manual de contingencia.
+* **Notas de Entrega a Clientes:** Emisión y descarga en PDF con formato corporativo, logotipo y firmas de recepción.
+* **Presupuestos y Cotizaciones:** Cotizaciones con validez temporal y conversión inmediata a venta.
+* **Notas de Crédito y Débito:** Procesamiento de devoluciones con reintegro automático de mercancía a stock.
 
 ---
 
-## 🛒 4. Módulo de Compras e Importaciones
-
-Permite reponer stock y mantener actualizados los costos promedios ponderados del catálogo.
-
-1. Vaya a **Compras > Registrar Compra**.
-2. Ingrese el Proveedor y agregue los ítems detallando cantidad y **costo unitario de compra actual**.
-3. Al guardar, el inventario se incrementa síncronamente y el costo de catálogo se recalcula automáticamente.
+## 🛍️ 4. Módulo de Compras y Proveedores
+* **Proveedores:** RIF, persona de contacto, agente de retención y cuentas bancarias.
+* **Órdenes de Compra y Recepción:** Recepción física en almacén con incremento de stock, recálculo de costo y generación de cuenta por pagar.
+* **Retenciones:** Retenciones de IVA (75%) e ISLR con emisión de comprobantes.
 
 ---
 
-## 🏦 5. Cuentas por Cobrar (CxC) y Cuentas por Pagar (CxP)
-
-* **Cuentas por Cobrar (CxC):** Registra saldos pendientes de clientes generados por ventas a crédito. Permite registrar abonos parciales ordenadamente.
-* **Cuentas por Pagar (CxP):** Registra compromisos adquiridos con proveedores por compras a plazos, facilitando la planeación de egresos.
-
----
-
-## 📝 6. Bitácora Universal de Movimientos
-
-Todas las operaciones críticas se graban de manera automática e inmutable en el Historial Universal de Movimientos, detallando fecha, hora, usuario y descripción exacta, garantizando auditorías 100% transparentes.
+## 🏦 5. Tesorería (Cuentas por Cobrar y por Pagar)
+* **Cuentas por Cobrar (CxC):** Registro de ventas a crédito, historial de cobros, amortizaciones parciales en USD o Bs. y reporte de antigüedad de saldos.
+* **Cuentas por Pagar (CxP):** Compromisos con proveedores y programación de pagos.
+* **Cuentas Bancarias:** Conciliación bancaria en bolívares y divisas.
 
 ---
 
-## 📥 7. Importación Masiva de Datos (Carga Inicial)
+## 📑 6. Módulo Fiscal y Reportes SENIAT
+* **Libros Oficiales:** Emisión automática de Libros de Compras y Ventas según la Providencia 0049.
+* **IGTF (3%):** Cálculo y desglose del impuesto en pagos percibidos en moneda extranjera.
 
-Para facilitar la migración de datos desde otros sistemas o desde Excel, APEX ERP cuenta con herramientas de carga masiva mediante archivos **CSV** (Valores separados por comas).
+---
 
-### A. Carga Inicial de Inventario y Productos
-1. Vaya a **Inventario > Catálogo**.
-2. Presione **Importar Cargo Inicial**.
-3. Haga clic en **Descargar Plantilla** para obtener el archivo de ejemplo.
-4. Llene la plantilla en Excel (sin modificar los encabezados) y guárdela asegurándose de elegir el formato **CSV**.
-5. Suba el archivo. El sistema creará los productos que no existan y registrará un **Cargo de Inventario** por las cantidades indicadas.
+## 👥 7. Nómina y Gestión Humana (LOTTT)
+* Expedientes de trabajadores, nóminas quincenales/mensuales, retenciones de ley (IVSS, FAOV, INCES), horas extras y recibos en PDF.
 
-### B. Directorio de Clientes y Proveedores
-1. Diríjase al módulo de **Clientes** (en Ventas) o **Proveedores** (en Compras/Inventario).
-2. Presione el botón **Plantilla CSV** para descargar la estructura requerida.
-3. Llene los datos requeridos (Nombre, RIF, Teléfono, etc.) y guarde el archivo como CSV.
-4. Haga clic en **Importar** y seleccione su archivo. El sistema registrará todo el directorio en un instante.
-> **Importante:** Si un RIF/Identificación fiscal ya existe en la base de datos, el sistema actualizará los datos de contacto en lugar de crear un duplicado.
+---
+
+## 🚀 8. Soporte Técnico Oficial InfaGraSolution
+* **Empresa:** InfaGraSolution  
+* **Contacto Técnico:** Luis Infante  
+* **Teléfono / WhatsApp:** 0412-0161906  
+* **Correo Electrónico:** infagrasolution@gmail.com  
 """
+
+SUPPORT_PHONE = "+584120161906"
 
 
 @router.get("/")
@@ -110,9 +93,6 @@ async def view_manual(current_user: User = Depends(get_current_user)):
         "content_markdown": MANUAL_TEXT_ES,
         "support_phone": SUPPORT_PHONE,
     }
-
-
-SUPPORT_PHONE = "+584120161906"
 
 
 @router.get("/download")
