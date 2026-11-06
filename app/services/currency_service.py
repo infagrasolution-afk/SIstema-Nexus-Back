@@ -48,7 +48,7 @@ class CurrencyService:
             # Many developers use mirrors for BCV data due to its instability
             logger.warning("BCV direct fetch failed or structure changed. Trying mirror...")
             mirror_url = "https://ve.dolarapi.com/v1/dolares/oficial"
-            mirror_resp = requests.get(mirror_url, timeout=10)
+            mirror_resp = requests.get(mirror_url, headers=headers, timeout=10)
             if mirror_resp.status_code == 200:
                 data = mirror_resp.json()
                 rate = float(data.get("promedio", 0) or data.get("valor", 0))
@@ -60,4 +60,4 @@ class CurrencyService:
             logger.error(f"Error fetching exchange rate: {e}")
         
         # Absolute fallback if everything fails
-        return 47.58 # Updated fallback to a more recent approximate value (April 2026)
+        return 896.12 # Real fallback value (BCV oficial)
