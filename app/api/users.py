@@ -192,9 +192,12 @@ async def update_user(
     - Admin puede cambiar el rol, módulos, contraseña y estado activo de cualquier usuario.
     - Un usuario normal solo puede cambiar su propia contraseña/email.
     """
-    result = await db.execute(
-        select(User).where(User.id == user_id, User.tenant_id == tenant_id)
-    )
+    if current_user.is_superuser:
+        result = await db.execute(select(User).where(User.id == user_id))
+    else:
+        result = await db.execute(
+            select(User).where(User.id == user_id, User.tenant_id == tenant_id)
+        )
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
@@ -214,7 +217,7 @@ async def update_user(
         if user_in.role_id is not None:
             # Validar que el rol es del mismo tenant
             role_check = await db.execute(
-                select(Role).where(Role.id == user_in.role_id, Role.tenant_id == tenant_id)
+                select(Role).where(Role.id == user_in.role_id, Role.tenant_id == user.tenant_id)
             )
             if not role_check.scalars().first():
                 raise HTTPException(status_code=400, detail="El rol seleccionado no existe en esta empresa")
@@ -231,10 +234,11 @@ async def update_user(
         user.email = user_in.email
     if user_in.password:
         user.hashed_password = get_password_hash(user_in.password)
-        # Si el propio usuario cambia su contraseña, se asume desbloqueo si estuviese bloqueado
+        # Si se cambia la contraseña, se desbloquea y se invalidan sesiones previas en otras máquinas
         user.is_locked = False
         user.login_attempts = 0
         user.locked_at = None
+        user.active_session_id = None
 
     user.updated_by_id = current_user.id
     user.updated_by_name = current_user.username
@@ -265,9 +269,12 @@ async def unlock_user(
             detail="No tienes permisos para desbloquear usuarios de esta empresa."
         )
 
-    result = await db.execute(
-        select(User).where(User.id == user_id, User.tenant_id == tenant_id)
-    )
+    if current_user.is_superuser:
+        result = await db.execute(select(User).where(User.id == user_id))
+    else:
+        result = await db.execute(
+            select(User).where(User.id == user_id, User.tenant_id == tenant_id)
+        )
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
@@ -300,9 +307,12 @@ async def delete_user(
     if current_user.id == user_id:
         raise HTTPException(status_code=400, detail="No puedes desactivarte a ti mismo")
 
-    result = await db.execute(
-        select(User).where(User.id == user_id, User.tenant_id == tenant_id)
-    )
+    if current_user.is_superuser:
+        result = await db.execute(select(User).where(User.id == user_id))
+    else:
+        result = await db.execute(
+            select(User).where(User.id == user_id, User.tenant_id == tenant_id)
+        )
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")

@@ -246,6 +246,7 @@ async def superadmin_reset_password_force(
     user.is_locked = False
     user.login_attempts = 0
     user.locked_at = None
+    user.active_session_id = None
     user.updated_by_id = admin.id
     user.updated_by_name = admin.username
 
