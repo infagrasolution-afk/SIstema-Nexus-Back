@@ -1,5 +1,6 @@
-from pydantic import BaseModel, ConfigDict
-from typing import Optional
+import json
+from pydantic import BaseModel, ConfigDict, field_validator
+from typing import Optional, Any
 from datetime import datetime
 
 class TenantBase(BaseModel):
@@ -10,13 +11,22 @@ class TenantBase(BaseModel):
     address: Optional[str] = None
     logo_url: Optional[str] = None
     parent_id: Optional[int] = None
-    modules: Optional[dict] = {"sales": {"is_active": True}, "inventory": {"is_active": True}, "accounting": {"is_active": True}}
+    modules: Optional[Any] = {"sales": {"is_active": True}, "inventory": {"is_active": True}, "accounting": {"is_active": True}}
     admin_username: Optional[str] = None
     admin_password: Optional[str] = None
     primary_color: Optional[str] = "#2563eb"
     secondary_color: Optional[str] = "#64748b"
-    settings: Optional[dict] = {}
+    settings: Optional[Any] = {}
 
+    @field_validator('modules', 'settings', mode='before')
+    @classmethod
+    def parse_json_fields(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return v
+        return v
 
 class TenantUpdate(TenantBase):
     name: Optional[str] = None
