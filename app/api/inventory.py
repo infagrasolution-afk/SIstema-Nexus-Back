@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
+from decimal import Decimal
 
 from app.api.deps import get_db, get_current_tenant, get_current_user
 from app.domain.inventory import Product, Warehouse, BinLocation, Batch, ExchangeRateHistory
@@ -229,13 +230,17 @@ async def get_products(
     stock_result = await db.execute(stock_stmt)
     stock_dict = {row[0]: row[1] for row in stock_result.all()}
     
-    rate = CurrencyService.get_bcv_rate()
+    rate_val = CurrencyService.get_bcv_rate()
+    rate = Decimal(str(rate_val)) if rate_val and rate_val > 0 else Decimal('1.0')
     for product in products:
-        product.stock = stock_dict.get(product.id, 0.0)
+        product.stock = Decimal(str(stock_dict.get(product.id, 0.0)))
         # Stored in Bs, convert to USD for frontend UI
-        product.price = product.price / rate if rate > 0 else product.price
-        product.cost = product.cost / rate if rate > 0 else product.cost
-        product.average_cost = product.average_cost / rate if rate > 0 else product.average_cost
+        if product.price is not None:
+            product.price = round(Decimal(str(product.price)) / rate, 4)
+        if product.cost is not None:
+            product.cost = round(Decimal(str(product.cost)) / rate, 4)
+        if product.average_cost is not None:
+            product.average_cost = round(Decimal(str(product.average_cost)) / rate, 4)
         
     return products
 
@@ -246,13 +251,17 @@ async def create_product(
     tenant_id: int = Depends(get_current_tenant)
 ):
     from sqlalchemy.exc import IntegrityError
-    rate = CurrencyService.get_bcv_rate()
+    rate_val = CurrencyService.get_bcv_rate()
+    rate = Decimal(str(rate_val)) if rate_val and rate_val > 0 else Decimal('1.0')
     
     # Convert input USD to Bs using daily exchange rate before storing
     product_data = product_in.model_dump()
-    product_data["price"] = product_data["price"] * rate
-    product_data["cost"] = product_data["cost"] * rate
-    product_data["average_cost"] = product_data["average_cost"] * rate
+    if product_data.get("price") is not None:
+        product_data["price"] = Decimal(str(product_data["price"])) * rate
+    if product_data.get("cost") is not None:
+        product_data["cost"] = Decimal(str(product_data["cost"])) * rate
+    if product_data.get("average_cost") is not None:
+        product_data["average_cost"] = Decimal(str(product_data["average_cost"])) * rate
     
     new_product = Product(**product_data, tenant_id=tenant_id)
     db.add(new_product)
@@ -265,12 +274,15 @@ async def create_product(
             raise HTTPException(status_code=400, detail="El SKU ingresado ya está registrado para otro producto. Por favor, utiliza un SKU único.")
         raise HTTPException(status_code=400, detail="Error de integridad: verifica que los datos sean válidos.")
     await db.refresh(new_product)
-    new_product.stock = 0.0
+    new_product.stock = Decimal('0.0')
     
     # Present USD to the frontend
-    new_product.price = new_product.price / rate if rate > 0 else new_product.price
-    new_product.cost = new_product.cost / rate if rate > 0 else new_product.cost
-    new_product.average_cost = new_product.average_cost / rate if rate > 0 else new_product.average_cost
+    if new_product.price is not None:
+        new_product.price = round(Decimal(str(new_product.price)) / rate, 4)
+    if new_product.cost is not None:
+        new_product.cost = round(Decimal(str(new_product.cost)) / rate, 4)
+    if new_product.average_cost is not None:
+        new_product.average_cost = round(Decimal(str(new_product.average_cost)) / rate, 4)
     
     return new_product
 
@@ -291,11 +303,15 @@ async def update_product(
     if not product:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
         
-    rate = CurrencyService.get_bcv_rate()
+    rate_val = CurrencyService.get_bcv_rate()
+    rate = Decimal(str(rate_val)) if rate_val and rate_val > 0 else Decimal('1.0')
     product_data = product_in.model_dump()
-    product_data["price"] = product_data["price"] * rate
-    product_data["cost"] = product_data["cost"] * rate
-    product_data["average_cost"] = product_data["average_cost"] * rate
+    if product_data.get("price") is not None:
+        product_data["price"] = Decimal(str(product_data["price"])) * rate
+    if product_data.get("cost") is not None:
+        product_data["cost"] = Decimal(str(product_data["cost"])) * rate
+    if product_data.get("average_cost") is not None:
+        product_data["average_cost"] = Decimal(str(product_data["average_cost"])) * rate
     
     for field, value in product_data.items():
         setattr(product, field, value)
@@ -318,12 +334,15 @@ async def update_product(
         .where(StockSummary.product_id == product.id)
         .where(StockSummary.tenant_id == tenant_id)
     )
-    product.stock = stock_result.scalar() or 0.0
+    product.stock = Decimal(str(stock_result.scalar() or 0.0))
     
     # Present USD to the frontend
-    product.price = product.price / rate if rate > 0 else product.price
-    product.cost = product.cost / rate if rate > 0 else product.cost
-    product.average_cost = product.average_cost / rate if rate > 0 else product.average_cost
+    if product.price is not None:
+        product.price = round(Decimal(str(product.price)) / rate, 4)
+    if product.cost is not None:
+        product.cost = round(Decimal(str(product.cost)) / rate, 4)
+    if product.average_cost is not None:
+        product.average_cost = round(Decimal(str(product.average_cost)) / rate, 4)
     
     return product
 
@@ -356,7 +375,8 @@ async def import_products_bulk(
 ):
     imported_count = 0
     errors = []
-    rate = CurrencyService.get_bcv_rate()
+    rate_val = CurrencyService.get_bcv_rate()
+    rate = Decimal(str(rate_val)) if rate_val and rate_val > 0 else Decimal('1.0')
     
     for idx, p_in in enumerate(products_in):
         if not p_in.sku or not p_in.name:
@@ -368,9 +388,9 @@ async def import_products_bulk(
         res = await db.execute(check_stmt)
         existing = res.scalars().first()
         
-        price_bs = p_in.price * rate
-        cost_bs = p_in.cost * rate
-        avg_cost_bs = p_in.average_cost * rate
+        price_bs = Decimal(str(p_in.price)) * rate if p_in.price is not None else Decimal('0.0')
+        cost_bs = Decimal(str(p_in.cost)) * rate if p_in.cost is not None else Decimal('0.0')
+        avg_cost_bs = Decimal(str(p_in.average_cost)) * rate if p_in.average_cost is not None else Decimal('0.0')
         
         if existing:
             # Update existing
@@ -410,7 +430,8 @@ async def import_initial_stock(
     
     imported_count = 0
     errors = []
-    rate = CurrencyService.get_bcv_rate()
+    rate_val = CurrencyService.get_bcv_rate()
+    rate = Decimal(str(rate_val)) if rate_val and rate_val > 0 else Decimal('1.0')
     
     for idx, item in enumerate(items_in):
         if not item.sku or not item.name:
@@ -422,8 +443,8 @@ async def import_initial_stock(
         res = await db.execute(check_stmt)
         product = res.scalars().first()
         
-        price_bs = item.price * rate
-        cost_bs = item.cost * rate
+        price_bs = Decimal(str(item.price)) * rate if item.price is not None else Decimal('0.0')
+        cost_bs = Decimal(str(item.cost)) * rate if item.cost is not None else Decimal('0.0')
         
         if not product:
             new_product = Product(
