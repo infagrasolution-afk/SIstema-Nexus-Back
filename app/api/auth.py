@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import hashlib
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -111,17 +112,25 @@ async def login_access_token(
         )
 
     # ── Login exitoso: resetear intentos ──────────────────────────────────────
+    # ── Login exitoso: resetear intentos y generar nueva sesión activa ────────
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Usuario inactivo. Contacta al administrador.")
 
     user.login_attempts = 0
+    # Generar sesión única activa: cualquier otra sesión previa en otra máquina queda invalidada
+    new_session_id = str(uuid.uuid4())
+    user.active_session_id = new_session_id
     await db.flush()
 
     access_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
-    access_token = create_access_token(user.id, user.tenant_id, expires_delta=access_expires)
-    refresh_token = create_refresh_token(user.id, user.tenant_id, expires_delta=refresh_expires)
+    access_token = create_access_token(
+        user.id, user.tenant_id, expires_delta=access_expires, session_id=new_session_id
+    )
+    refresh_token = create_refresh_token(
+        user.id, user.tenant_id, expires_delta=refresh_expires, session_id=new_session_id
+    )
 
     refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     hashed_rt = hashlib.sha256(refresh_token.encode()).hexdigest()
@@ -159,6 +168,22 @@ async def refresh_access_token(
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token inválido")
 
+    # Verificar si el usuario existe y si su sesión no fue cerrada por un login posterior en otra máquina
+    user_res = await db.execute(select(User).where(User.id == int(token_data.sub)))
+    user = user_res.scalars().first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="SESSION_SUPERSEDED: Usuario no disponible o sesión cerrada."
+        )
+
+    # Si el usuario tiene una sesión activa diferente, esta sesión en esta máquina se cierra
+    if token_data.session_id and user.active_session_id and token_data.session_id != user.active_session_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SESSION_SUPERSEDED: Tu sesión ha sido abierta en otro dispositivo. Se ha cerrado esta sesión automáticamente."
+        )
+
     result = await db.execute(select(RefreshToken).where(RefreshToken.jti == token_data.jti))
     stored = result.scalars().first()
 
@@ -181,8 +206,13 @@ async def refresh_access_token(
     access_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
-    new_access_token = create_access_token(int(token_data.sub), int(token_data.tenant_id), expires_delta=access_expires)
-    new_refresh_token = create_refresh_token(int(token_data.sub), int(token_data.tenant_id), expires_delta=refresh_expires)
+    current_sid = user.active_session_id or token_data.session_id
+    new_access_token = create_access_token(
+        int(token_data.sub), int(token_data.tenant_id), expires_delta=access_expires, session_id=current_sid
+    )
+    new_refresh_token = create_refresh_token(
+        int(token_data.sub), int(token_data.tenant_id), expires_delta=refresh_expires, session_id=current_sid
+    )
 
     new_refresh_payload = jwt.decode(new_refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     new_hashed_rt = hashlib.sha256(new_refresh_token.encode()).hexdigest()

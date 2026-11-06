@@ -19,5 +19,6 @@ class User(Base, TimestampMixin, TenantMixin, AuditMixin):
     login_attempts = Column(Integer, default=0, nullable=False)
     is_locked = Column(Boolean, default=False, nullable=False)
     locked_at = Column(DateTime(timezone=True), nullable=True)
+    active_session_id = Column(String, nullable=True)
 
     role = relationship("Role", back_populates="users")

@@ -23,6 +23,7 @@ class TokenPayload(BaseModel):
     tenant_id: Optional[int] = None
     jti: Optional[str] = None
     type: Optional[str] = None
+    session_id: Optional[str] = None
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
@@ -34,9 +35,14 @@ def _generate_jti() -> str:
     """Generate a unique JWT ID (jti) for token revocation tracking."""
     return str(uuid.uuid4())
 
-def create_access_token(subject: int | Any, tenant_id: int, expires_delta: timedelta | None = None) -> str:
+def create_access_token(
+    subject: int | Any, 
+    tenant_id: int, 
+    expires_delta: timedelta | None = None,
+    session_id: str | None = None
+) -> str:
     """Create a short‑lived access token.
-    Includes standard claims: exp, sub, tenant_id, jti, and token_type.
+    Includes standard claims: exp, sub, tenant_id, jti, token_type, and session_id.
     """
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode = {
@@ -46,9 +52,16 @@ def create_access_token(subject: int | Any, tenant_id: int, expires_delta: timed
         "jti": _generate_jti(),
         "type": "access",
     }
+    if session_id:
+        to_encode["session_id"] = str(session_id)
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
-def create_refresh_token(subject: int | Any, tenant_id: int, expires_delta: timedelta | None = None) -> str:
+def create_refresh_token(
+    subject: int | Any, 
+    tenant_id: int, 
+    expires_delta: timedelta | None = None,
+    session_id: str | None = None
+) -> str:
     """Create a longer‑lived refresh token.
     Refresh tokens are stored hashed in the DB for revocation checks.
     """
@@ -60,6 +73,8 @@ def create_refresh_token(subject: int | Any, tenant_id: int, expires_delta: time
         "jti": _generate_jti(),
         "type": "refresh",
     }
+    if session_id:
+        to_encode["session_id"] = str(session_id)
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 async def get_master_db() -> AsyncGenerator[AsyncSession, None]:

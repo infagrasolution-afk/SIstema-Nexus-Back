@@ -51,6 +51,15 @@ async def get_current_user(
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
         
+    # Control de sesión única: si el usuario inició sesión en otra máquina, se invalida la anterior
+    token_session_id = getattr(token_data, "session_id", None) or payload.get("session_id")
+    if token_session_id and user.active_session_id and token_session_id != user.active_session_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SESSION_SUPERSEDED: Tu cuenta ha sido abierta en otro dispositivo o navegador. Se ha cerrado esta sesión automáticamente.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return user
 
 async def get_current_tenant(
