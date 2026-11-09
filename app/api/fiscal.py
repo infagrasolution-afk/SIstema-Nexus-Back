@@ -8,14 +8,14 @@ from sqlalchemy.orm import selectinload
 from typing import Optional
 from datetime import datetime, timezone
 
-from app.api.deps import get_current_tenant, get_db, get_master_db, get_current_user
+from app.api.deps import get_current_tenant, get_db, get_master_db, get_current_user, require_module
 from app.domain.sales import Sale, CreditNote
 from app.domain.purchases import Purchase
 from app.domain.tenant import Tenant
 from app.domain.user import User
 from app.services.pdf_service import PDFService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("fiscal"))])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

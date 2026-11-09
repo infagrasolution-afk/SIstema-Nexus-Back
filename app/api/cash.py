@@ -16,7 +16,7 @@ from app.domain.user import User
 from app.domain.cash import CashSession as DBCashSession, CashRegister as DBCashRegister
 from app.domain.sales import Sale
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("cash"))])
 
 
 @router.get("/session/current", response_model=Optional[CashSession])

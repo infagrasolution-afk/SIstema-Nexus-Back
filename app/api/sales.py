@@ -5,7 +5,7 @@ from sqlalchemy import select, or_
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
-from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
+from app.api.deps import get_db, get_current_tenant, get_current_user, require_module, require_permissions
 from app.services.sales_service import SalesService
 from app.services.pdf_service import PDFService
 from app.schemas.sales import (
@@ -28,6 +28,7 @@ async def create_sale(
     tenant_id: int = Depends(get_current_tenant),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(require_module("sales")),
+    _perm: User = Depends(require_permissions(["sales:write"])),
 ):
     try:
         return await SalesService.create_sale(db, sale_in, tenant_id, current_user.id, current_user.username)
@@ -40,6 +41,7 @@ async def list_sales(
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
     _: bool = Depends(require_module("sales")),
+    _perm: User = Depends(require_permissions(["sales:read"])),
     status: Optional[str] = Query(None, description="COMPLETED | ON_HOLD | CANCELLED"),
     customer_id: Optional[int] = Query(None),
     date_from: Optional[datetime] = Query(None),
@@ -172,6 +174,7 @@ async def cancel_sale(
     tenant_id: int = Depends(get_current_tenant),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(require_module("sales")),
+    _perm: User = Depends(require_permissions(["sales:void"])),
 ):
     """Cancela una venta. Si estaba COMPLETED, revierte el inventario. No cancela ventas de caja cerrada."""
     result = await db.execute(

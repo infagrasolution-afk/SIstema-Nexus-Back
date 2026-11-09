@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 import hashlib
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Dict, List
+from collections import defaultdict
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from jose import jwt, JWTError
@@ -9,7 +11,7 @@ from jose import jwt, JWTError
 from app.api.deps import get_current_user, get_master_db
 from app.core.security import (
     verify_password, create_access_token, create_refresh_token,
-    get_password_hash as hash_token, TokenPayload
+    TokenPayload
 )
 from app.core.config import settings
 from app.domain.user import User
@@ -19,57 +21,105 @@ from app.schemas.user import UserResponse
 
 router = APIRouter()
 
-# ─── Configuración de bloqueo ─────────────────────────────────────────────────
-MAX_LOGIN_ATTEMPTS = 3
+# ─── Configuración de Seguridad y Soporte ─────────────────────────────────────
+MAX_LOGIN_ATTEMPTS = settings.MAX_LOGIN_ATTEMPTS
+LOCKOUT_MINUTES = settings.LOCKOUT_MINUTES
 SUPPORT_WHATSAPP = "+58 412 016 1906"
 SUPPORT_MESSAGE = (
-    "Tu cuenta ha sido bloqueada por seguridad tras 3 intentos fallidos. "
-    f"Contacta a soporte técnico por WhatsApp: {SUPPORT_WHATSAPP} "
-    "para recuperar el acceso."
+    "Tu cuenta ha sido bloqueada temporalmente tras varios intentos fallidos por seguridad. "
+    f"Si eres administrador, puedes contactar a soporte técnico oficial por WhatsApp: {SUPPORT_WHATSAPP} "
+    "o esperar el tiempo de desbloqueo automático."
 )
+
+# In-memory rate limiting por IP (limpia intentos viejos en cada llamada)
+_ip_attempts: Dict[str, List[datetime]] = defaultdict(list)
+
+
+def _check_ip_rate_limit(client_ip: str) -> None:
+    now = datetime.utcnow()
+    window = timedelta(seconds=settings.LOGIN_RATE_WINDOW_SECONDS)
+    # Filtrar solo intentos dentro de la ventana de tiempo
+    attempts = [t for t in _ip_attempts[client_ip] if now - t < window]
+    _ip_attempts[client_ip] = attempts
+
+    if len(attempts) >= settings.LOGIN_RATE_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Demasiados intentos de acceso desde esta conexión. "
+                "Por tu seguridad, espera unos minutos antes de volver a intentar."
+            )
+        )
+    _ip_attempts[client_ip].append(now)
 
 
 @router.get("/me", response_model=UserResponse)
 async def read_user_me(current_user: User = Depends(get_current_user)):
+    """Retorna la información del usuario autenticado."""
     return current_user
 
 
 @router.post("/login", response_model=Token)
 async def login_access_token(
     login_data: Login,
+    request: Request,
     db: AsyncSession = Depends(get_master_db)
 ):
-    result = await db.execute(select(User).where(User.username == login_data.username))
+    # Validar límite de intentos por dirección IP
+    client_ip = request.client.host if request.client else "unknown"
+    _check_ip_rate_limit(client_ip)
+
+    username_clean = (login_data.username or "").strip()
+    result = await db.execute(select(User).where(User.username == username_clean))
     user = result.scalars().first()
 
     # ── Usuario no existe ──────────────────────────────────────────────────────
     if not user:
-        raise HTTPException(status_code=400, detail="Usuario o contraseña incorrectos")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Nombre de usuario o contraseña incorrectos"
+        )
 
-    # ── Cuenta bloqueada ───────────────────────────────────────────────────────
+    # ── Cuenta bloqueada (con expiración temporal automática) ──────────────────
     if user.is_locked:
-        if user.is_superuser:
-            # Admin de empresa bloqueado → contactar soporte
-            raise HTTPException(
-                status_code=423,  # 423 Locked
-                detail={
-                    "type": "account_locked_admin",
-                    "message": SUPPORT_MESSAGE,
-                    "whatsapp": SUPPORT_WHATSAPP,
-                    "whatsapp_link": f"https://wa.me/584120161906?text=Hola,%20necesito%20desbloquear%20mi%20cuenta%20de%20administrador%20en%20el%20ERP.%20Usuario:%20{user.username}",
-                    "locked_at": user.locked_at.isoformat() if user.locked_at else None,
-                }
-            )
+        now = datetime.utcnow()
+        lock_time = user.locked_at.replace(tzinfo=None) if user.locked_at else None
+        lockout_delta = timedelta(minutes=LOCKOUT_MINUTES)
+
+        # Si ya transcurrió el tiempo de penalización, desbloquear automáticamente
+        if lock_time and (now - lock_time) >= lockout_delta:
+            user.is_locked = False
+            user.login_attempts = 0
+            user.locked_at = None
+            await db.commit()
         else:
-            # Usuario regular bloqueado → que contacte a su admin de empresa
-            raise HTTPException(
-                status_code=423,
-                detail={
-                    "type": "account_locked",
-                    "message": "Tu cuenta está bloqueada. Contacta al administrador de tu empresa para desbloquearla.",
-                    "locked_at": user.locked_at.isoformat() if user.locked_at else None,
-                }
-            )
+            time_left_min = int((lockout_delta - (now - lock_time)).total_seconds() / 60) if lock_time else LOCKOUT_MINUTES
+            time_left_str = f" Podrás reintentar en aproximadamente {max(1, time_left_min)} minuto(s)."
+
+            if user.is_superuser:
+                raise HTTPException(
+                    status_code=423,  # 423 Locked
+                    detail={
+                        "type": "account_locked_admin",
+                        "message": SUPPORT_MESSAGE + time_left_str,
+                        "whatsapp": SUPPORT_WHATSAPP,
+                        "whatsapp_link": f"https://wa.me/584120161906?text=Hola,%20necesito%20desbloquear%20mi%20cuenta%20de%20administrador%20en%20el%20ERP.%20Usuario:%20{user.username}",
+                        "locked_at": user.locked_at.isoformat() if user.locked_at else None,
+                    }
+                )
+            else:
+                raise HTTPException(
+                    status_code=423,
+                    detail={
+                        "type": "account_locked",
+                        "message": (
+                            "Tu cuenta se encuentra bloqueada por seguridad tras 3 intentos fallidos."
+                            + time_left_str
+                            + " O solicita al administrador de tu empresa que la desbloquee de inmediato."
+                        ),
+                        "locked_at": user.locked_at.isoformat() if user.locked_at else None,
+                    }
+                )
 
     # ── Contraseña incorrecta ──────────────────────────────────────────────────
     if not verify_password(login_data.password, user.hashed_password):
@@ -96,25 +146,30 @@ async def login_access_token(
                     status_code=423,
                     detail={
                         "type": "account_locked",
-                        "message": "Cuenta bloqueada tras 3 intentos fallidos. Contacta al administrador de tu empresa.",
+                        "message": (
+                            f"Cuenta bloqueada por seguridad tras {MAX_LOGIN_ATTEMPTS} intentos fallidos. "
+                            f"Se desbloqueará automáticamente en {LOCKOUT_MINUTES} minutos o puedes solicitar al administrador de tu empresa que la reactive."
+                        ),
                     }
                 )
 
         await db.commit()
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "type": "wrong_password",
                 "message": "Usuario o contraseña incorrectos",
                 "attempts_left": attempts_left,
-                "warning": f"⚠️ Te quedan {attempts_left} intento(s) antes de que tu cuenta sea bloqueada."
+                "warning": f"⚠️ Te quedan {attempts_left} intento(s) antes del bloqueo temporal de tu cuenta."
             }
         )
 
-    # ── Login exitoso: resetear intentos ──────────────────────────────────────
-    # ── Login exitoso: resetear intentos y generar nueva sesión activa ────────
+    # ── Login exitoso: validar estado y generar sesión activa ──────────────────
     if not user.is_active:
-        raise HTTPException(status_code=400, detail="Usuario inactivo. Contacta al administrador.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Tu usuario está inactivo en el sistema. Contacta al administrador de la empresa."
+        )
 
     user.login_attempts = 0
     # Generar sesión única activa: cualquier otra sesión previa en otra máquina queda invalidada
@@ -164,11 +219,11 @@ async def refresh_access_token(
         payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         token_data = TokenPayload(**payload)
         if token_data.type != "refresh":
-            raise HTTPException(status_code=400, detail="Invalid token type")
+            raise HTTPException(status_code=400, detail="Tipo de token no válido para renovación")
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token inválido")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="El token de actualización ha expirado o no es válido")
 
-    # Verificar si el usuario existe y si su sesión no fue cerrada por un login posterior en otra máquina
+    # Verificar si el usuario existe y si su sesión sigue vigente
     user_res = await db.execute(select(User).where(User.id == int(token_data.sub)))
     user = user_res.scalars().first()
     if not user or not user.is_active:
@@ -177,7 +232,7 @@ async def refresh_access_token(
             detail="SESSION_SUPERSEDED: Usuario no disponible o sesión cerrada."
         )
 
-    # Si el usuario tiene una sesión activa diferente, esta sesión en esta máquina se cierra
+    # Si el usuario tiene una sesión activa diferente, esta sesión se cierra
     if token_data.session_id and user.active_session_id and token_data.session_id != user.active_session_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -188,9 +243,9 @@ async def refresh_access_token(
     stored = result.scalars().first()
 
     if stored is None or stored.revoked:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token revocado o no encontrado")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="El token de actualización ha sido revocado o ya no es válido")
 
-    # High-performance SHA-256 validation with legacy bcrypt fallback
+    # Validación de token
     token_sha = hashlib.sha256(refresh_token.encode()).hexdigest()
     is_valid = False
     if stored.token == token_sha:
@@ -199,7 +254,7 @@ async def refresh_access_token(
         is_valid = verify_password(refresh_token, stored.token)
 
     if not is_valid:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token no coincide")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token de actualización no coincide")
 
     stored.revoked = True
 
@@ -246,7 +301,7 @@ async def logout(
         payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         jti = payload.get("jti")
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token no válido")
 
     if jti:
         result = await db.execute(select(RefreshToken).where(RefreshToken.jti == jti))

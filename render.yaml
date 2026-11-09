@@ -4,11 +4,18 @@ services:
     env: python
     plan: free
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'"
+    healthCheckPath: /health
     envVars:
+      # SEGURIDAD: la URL de la base de datos se configura SOLO en el panel de Render
+      # (Environment → DATABASE_URL). Nunca se escribe aquí.
       - key: DATABASE_URL
-        value: "postgresql://admin:rvham9UEK8B8yhvKcRYk42BuMNrCaeVn@dpg-d95fdt5ckfvc73ba7d9g-a/erp_db_qoj0"
+        sync: false
       - key: SECRET_KEY
         generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: "https://erp-frontend-8hz1.onrender.com"
+      - key: ENVIRONMENT
+        value: "production"
       - key: PYTHON_VERSION
         value: "3.12.3"

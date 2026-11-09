@@ -3,11 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 
-from app.api.deps import get_db, get_current_tenant
+from app.api.deps import get_db, get_current_tenant, require_module
 from app.domain.purchases import Supplier
 from app.schemas.suppliers import SupplierCreate, SupplierResponse, SupplierUpdate
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("purchases"))])
 
 @router.get("/", response_model=List[SupplierResponse])
 async def get_suppliers(

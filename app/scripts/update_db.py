@@ -224,6 +224,17 @@ async def update_all_databases():
         
     print("Running automatic database branding migration...")
     try:
+        async with master_engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_tenant_admin BOOLEAN DEFAULT FALSE"))
+            # Backfill: el primer usuario de cada tenant (o 'demo') se marca como is_tenant_admin
+            await conn.execute(text("""
+                UPDATE users SET is_tenant_admin = TRUE 
+                WHERE username = 'demo' 
+                   OR (is_superuser = FALSE AND id IN (
+                       SELECT MIN(id) FROM users WHERE is_superuser = FALSE GROUP BY tenant_id
+                   ))
+            """))
+
         async with MasterSessionLocal() as session:
             await session.execute(text("UPDATE tenants SET name = 'APEX MASTER CORP' WHERE id = 1"))
             await session.execute(text("UPDATE tenants SET email = 'infagrasolution@gmail.com' WHERE id = 1"))

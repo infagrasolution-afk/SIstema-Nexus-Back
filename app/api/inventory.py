@@ -19,7 +19,7 @@ from app.schemas.inventory import (
     DispatchNoteCreate, DispatchNoteResponse,
     InitialStockImport
 )
-from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
+from app.api.deps import get_db, get_current_tenant, get_current_user, require_module, require_permissions
 from pydantic import BaseModel
 
 class RateUpdate(BaseModel):
@@ -97,12 +97,13 @@ async def transfer_stock(
     tenant_id: int = Depends(get_current_tenant),
     current_user: BaseModel = Depends(get_current_user),
     _: bool = Depends(require_module("inventory")),
+    _perm: User = Depends(require_permissions(["inventory:transfer"])),
 ):
     await InventoryService.transfer_stock(
         db, transfer.product_id, transfer.from_warehouse_id,
         transfer.to_warehouse_id, transfer.quantity, tenant_id
     )
-    return {"message": "Transfer successful"}
+    return {"message": "Transferencia de mercancía completada con éxito"}
 
 @router.post("/adjustments")
 async def adjust_stock(
@@ -111,6 +112,7 @@ async def adjust_stock(
     tenant_id: int = Depends(get_current_tenant),
     current_user: BaseModel = Depends(get_current_user),
     _: bool = Depends(require_module("inventory")),
+    _perm: User = Depends(require_permissions(["inventory:adjust"])),
 ):
     movement = await InventoryService.adjust_stock(
         db=db,
@@ -118,13 +120,14 @@ async def adjust_stock(
         tenant_id=tenant_id,
         user_id=current_user.id
     )
-    return {"message": "Stock adjusted successfully", "movement_id": movement.id}
+    return {"message": "Ajuste de inventario aplicado con éxito", "movement_id": movement.id}
 
 @router.get("/adjustments", response_model=List[StockMovementResponse])
 async def get_adjustments(
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
     _: bool = Depends(require_module("inventory")),
+    _perm: User = Depends(require_permissions(["inventory:read"])),
 ):
     from sqlalchemy.orm import selectinload
     from app.domain.inventory import StockMovement
@@ -145,6 +148,7 @@ async def create_charge(
     tenant_id: int = Depends(get_current_tenant),
     current_user: BaseModel = Depends(get_current_user),
     _: bool = Depends(require_module("inventory")),
+    _perm: User = Depends(require_permissions(["inventory:charge"])),
 ):
     movement = await InventoryService.charge_stock(
         db=db,
@@ -152,7 +156,7 @@ async def create_charge(
         tenant_id=tenant_id,
         user_id=current_user.id
     )
-    return {"message": "Cargo registrado con éxito", "movement_id": movement.id}
+    return {"message": "Cargo de mercancía registrado con éxito", "movement_id": movement.id}
 
 @router.get("/charges", response_model=List[StockMovementResponse])
 async def get_charges(
@@ -179,6 +183,7 @@ async def create_discharge(
     tenant_id: int = Depends(get_current_tenant),
     current_user: BaseModel = Depends(get_current_user),
     _: bool = Depends(require_module("inventory")),
+    _perm: User = Depends(require_permissions(["inventory:discharge"])),
 ):
     movement = await InventoryService.discharge_stock(
         db=db,
@@ -193,6 +198,7 @@ async def get_discharges(
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
     _: bool = Depends(require_module("inventory")),
+    _perm: User = Depends(require_permissions(["inventory:read"])),
 ):
     from sqlalchemy.orm import selectinload
     from app.domain.inventory import StockMovement, MovementType, MovementSubtype
@@ -215,6 +221,7 @@ async def get_products(
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
     _: bool = Depends(require_module("inventory")),
+    _perm: User = Depends(require_permissions(["inventory:read"])),
 ):
     result = await db.execute(select(Product).where(Product.tenant_id == tenant_id))
     products = result.scalars().all()
@@ -248,7 +255,9 @@ async def get_products(
 async def create_product(
     product_in: ProductCreate, 
     db: AsyncSession = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant)
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("inventory")),
+    _perm: User = Depends(require_permissions(["inventory:write"])),
 ):
     from sqlalchemy.exc import IntegrityError
     rate_val = CurrencyService.get_bcv_rate()

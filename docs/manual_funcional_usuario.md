@@ -74,14 +74,17 @@
 4. Presione el botón **Iniciar Sesión**.
 5. Al ingresar por primera vez, el sistema ejecutará el **Asistente Guiado (System Wizard)** que le enseñará la ubicación de los módulos clave.
 
-### 2.2. Políticas de Seguridad y Bloqueo de Cuentas
-* **Intentos Fallidos:** Se permiten hasta 3 intentos fallidos consecutivos de contraseña.
-* **Bloqueo Preventivo:** Al tercer intento incorrecto, la cuenta se bloquea automáticamente para repeler ataques de fuerza bruta.
-* **Desbloqueo de Usuarios:** El Administrador de la empresa puede desbloquear usuarios desde la pantalla **Administración > Usuarios**.
-* **Bloqueo del Administrador Principal:** En caso de que la cuenta administradora se bloquee, contacte de inmediato a **InfaGraSolution (Luis Infante al 0412-0161906 o infagrasolution@gmail.com)** para su restablecimiento seguro.
+### 2.2. Políticas de Seguridad, Bloqueo y Desbloqueo de Cuentas
+* **Intentos Fallidos:** Se permiten hasta 3 intentos consecutivos de contraseña.
+* **Bloqueo Preventivo Temporal (15 Minutos):** Al registrar el 3er intento fallido consecutivo, el sistema activa un bloqueo de seguridad estilo banca electrónica.
+* **Desbloqueo Automático:** Trascurrido un lapso de **15 minutos**, la cuenta se desbloquea de forma automática, permitiendo intentar nuevamente.
+* **Desbloqueo Inmediato por el Administrador:** Si un empleado necesita ingresar con urgencia, el Administrador de la empresa puede entrar a **Administración > Usuarios** y presionar el botón de candado **Desbloquear Cuenta** al lado del usuario bloqueado.
+* **Soporte de Emergencia:** Si la cuenta del Administrador principal sufre un bloqueo o extravío de credenciales, comuníquese de inmediato por WhatsApp con **InfaGraSolution al +58 412-0161906** o por correo a **infagrasolution@gmail.com**.
 
-### 2.3. Cierre de Sesión Automático por Inactividad
-Por regulaciones bancarias y de resguardo comercial, el sistema detecta períodos prolongados de inactividad (sin movimiento de mouse o teclado) y cerrará la sesión de forma segura para evitar que personal no autorizado acceda a la computadora si queda desatendida.
+### 2.3. Control de Sesión Única y Concurrencia
+Para salvaguardar las operaciones de caja y evitar fraudes o errores entre operadores:
+* **Una Sola Máquina a la Vez:** Un mismo usuario no puede operar en dos computadoras o pestañas a la vez. Si inicia sesión en un nuevo dispositivo, la sesión anterior en la otra máquina se cierra automáticamente.
+* **Protección contra Inactividad:** Si el sistema permanece inactivo (sin uso de teclado o mouse durante el tiempo configurado), la sesión se cerrará automáticamente para proteger la pantalla si el operador se aleja de su puesto.
 
 ---
 

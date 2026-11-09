@@ -88,6 +88,7 @@ async def create_tenant(
             tenant_id=new_tenant.id,
             is_active=True,
             is_superuser=False, # Tenant admin is NOT a global superuser
+            is_tenant_admin=True,
             modules=user_modules
         )
         db.add(new_user)
@@ -179,13 +180,15 @@ async def create_tenant_admin(
 ):
     result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     if not result.scalars().first():
-        raise HTTPException(status_code=404, detail="Tenant not found")
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
         
     new_user = User(
+        username=user_in.username,
         email=user_in.email,
         hashed_password=get_password_hash(user_in.password),
         tenant_id=tenant_id,
-        is_superuser=user_in.is_superuser,
+        is_superuser=user_in.is_superuser or False,
+        is_tenant_admin=True,
         modules=user_in.modules
     )
     db.add(new_user)

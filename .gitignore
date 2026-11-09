@@ -4,9 +4,11 @@ env/
 ENV/
 .env
 
-# Archivos de base de datos SQLite
+# Archivos de base de datos SQLite y respaldos
 *.db
 *.sqlite3
+backups/
+*.json.gz
 
 # Archivos compilados de Python
 __pycache__/

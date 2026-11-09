@@ -14,8 +14,10 @@ router = APIRouter()
 
 
 def _is_tenant_admin(current_user: User, tenant_id: int) -> bool:
-    """Un usuario es admin de su tenant si pertenece a él y tiene módulos asignados."""
-    return current_user.tenant_id == tenant_id and current_user.modules is not None
+    """Un usuario es admin de su empresa si es superusuario global o tiene asignado el rol de administrador de empresa."""
+    if current_user.is_superuser:
+        return True
+    return current_user.tenant_id == tenant_id and bool(getattr(current_user, "is_tenant_admin", False))
 
 
 async def _load_user_role(db: AsyncSession, user: User) -> dict:
@@ -49,7 +51,7 @@ async def get_users(
 ):
     """Lista todos los usuarios de la empresa con su rol y permisos."""
     if not current_user.is_superuser and not _is_tenant_admin(current_user, tenant_id):
-        raise HTTPException(status_code=403, detail="Sin permisos para listar usuarios")
+        raise HTTPException(status_code=403, detail="No tienes permisos para ver los usuarios de la empresa.")
 
     result = await db.execute(select(User).where(User.tenant_id == tenant_id))
     users = result.scalars().all()
@@ -72,7 +74,7 @@ async def get_available_roles(
 ):
     """Retorna los roles del tenant disponibles para asignar a usuarios."""
     if not current_user.is_superuser and not _is_tenant_admin(current_user, tenant_id):
-        raise HTTPException(status_code=403, detail="Sin permisos")
+        raise HTTPException(status_code=403, detail="No tienes permisos para consultar roles.")
 
     result = await db.execute(
         select(Role).where(Role.tenant_id == tenant_id)
@@ -127,25 +129,28 @@ async def create_user(
 ):
     """
     Crea un nuevo usuario dentro de la empresa.
-
-    El admin de la empresa puede:
-    - Asignar un **rol existente** (`role_id`) → el usuario hereda todos los permisos del rol
-    - Especificar los **módulos** que puede ver (`modules`: "sales,inventory")
-    - El superadmin global puede crear admins; el admin de empresa no puede crear superadmins globales
     """
     if not current_user.is_superuser and not _is_tenant_admin(current_user, tenant_id):
         raise HTTPException(
             status_code=403,
-            detail="No tienes permisos para crear usuarios. Contacta al administrador."
+            detail="No tienes permisos para crear usuarios. Contacta al administrador de la empresa."
+        )
+
+    # Validación de contraseña robusta
+    if not user_in.password or len(user_in.password.strip()) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="La contraseña debe tener al menos 8 caracteres para proteger la seguridad de la empresa."
         )
 
     # El admin de tenant NO puede crear superadmins globales
     final_is_superuser = user_in.is_superuser if current_user.is_superuser else False
+    final_is_tenant_admin = bool(user_in.is_tenant_admin)
 
     # Verificar que el username no exista
     result = await db.execute(select(User).where(User.username == user_in.username))
     if result.scalars().first():
-        raise HTTPException(status_code=400, detail=f"El usuario '{user_in.username}' ya existe")
+        raise HTTPException(status_code=400, detail=f"El nombre de usuario '{user_in.username}' ya está en uso. Por favor elige otro.")
 
     # Validar que el role_id pertenece al mismo tenant (si se envía)
     if user_in.role_id:
@@ -156,11 +161,12 @@ async def create_user(
             raise HTTPException(status_code=400, detail="El rol seleccionado no existe en esta empresa")
 
     new_user = User(
-        username=user_in.username,
+        username=user_in.username.strip(),
         email=user_in.email,
         hashed_password=get_password_hash(user_in.password),
         is_active=user_in.is_active if user_in.is_active is not None else True,
         is_superuser=final_is_superuser,
+        is_tenant_admin=final_is_tenant_admin,
         tenant_id=tenant_id,
         modules=user_in.modules,
         role_id=user_in.role_id,
@@ -206,7 +212,7 @@ async def update_user(
     is_self = current_user.id == user_id
 
     if not is_admin and not is_self:
-        raise HTTPException(status_code=403, detail="No tienes permisos para editar este usuario")
+        raise HTTPException(status_code=403, detail="No tienes permisos para modificar este usuario.")
 
     # Campos que solo el admin puede cambiar
     if is_admin:
@@ -214,6 +220,8 @@ async def update_user(
             user.modules = user_in.modules
         if user_in.is_active is not None:
             user.is_active = user_in.is_active
+        if user_in.is_tenant_admin is not None and not user.is_superuser:
+            user.is_tenant_admin = user_in.is_tenant_admin
         if user_in.role_id is not None:
             # Validar que el rol es del mismo tenant
             role_check = await db.execute(
@@ -229,11 +237,16 @@ async def update_user(
 
     # Campos que cualquiera puede cambiar en sí mismo
     if user_in.username is not None:
-        user.username = user_in.username
+        user.username = user_in.username.strip()
     if user_in.email is not None:
         user.email = user_in.email
     if user_in.password:
-        user.hashed_password = get_password_hash(user_in.password)
+        if len(user_in.password.strip()) < 8:
+            raise HTTPException(
+                status_code=400,
+                detail="La nueva contraseña debe tener al menos 8 caracteres para mayor seguridad."
+            )
+        user.hashed_password = get_password_hash(user_in.password.strip())
         # Si se cambia la contraseña, se desbloquea y se invalidan sesiones previas en otras máquinas
         user.is_locked = False
         user.login_attempts = 0

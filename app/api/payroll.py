@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from decimal import Decimal
 
-from app.api.deps import get_db, get_current_tenant, get_current_user
+from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from app.domain.payroll import Employee, PayrollPeriod, PayrollReceipt, PayrollPeriodStatus
 from app.schemas.payroll import (
     EmployeeCreate, EmployeeUpdate, EmployeeResponse,
@@ -13,7 +13,7 @@ from app.schemas.payroll import (
 )
 from app.services.payroll_service import PayrollService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("payroll"))])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

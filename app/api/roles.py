@@ -67,6 +67,17 @@ SYSTEM_PERMISSIONS = [
 
     # ── Reportes ────────────────────────────────────────────────────────────
     ("reports:read",     "Ver reportes y bitácora de movimientos",           "reports"),
+
+    # ── Nómina y RRHH (LOTTT) ───────────────────────────────────────────────
+    ("payroll:read",     "Consultar expedientes de trabajadores y nómina",   "payroll"),
+    ("payroll:write",    "Registrar trabajadores, calcular y cerrar nóminas", "payroll"),
+
+    # ── Fiscal SENIAT ───────────────────────────────────────────────────────
+    ("fiscal:read",      "Consultar y emitir libros de ventas/compras SENIAT","fiscal"),
+
+    # ── Usuarios ────────────────────────────────────────────────────────────
+    ("users:read",       "Ver usuarios de la empresa",                       "users"),
+    ("users:write",      "Crear, editar o desactivar usuarios",              "users"),
 ]
 
 
@@ -283,6 +294,14 @@ async def seed_default_roles(
                 "cash:read", "cash:write",
                 "sales:read", "sales:write",
                 "inventory:read",
+            ],
+        },
+        {
+            "name": "Especialista de RRHH",
+            "description": "Gestión de trabajadores, nóminas y recibos LOTTT",
+            "codes": [
+                "payroll:read", "payroll:write",
+                "reports:read",
             ],
         },
     ]

@@ -1,6 +1,6 @@
-# 🛠️ Manual Técnico de Arquitectura y Operaciones — Nexus ERP Enterprise
-> **Versión 2.0 Enterprise** · Infagra Solution · Sistema de Gestión Empresarial Multi-Tenant  
-> *Documentación técnica de arquitectura, base de datos, APIs, seguridad y despliegue para ingenieros y administradores de sistemas.*
+# 🛠️ Manual Técnico de Arquitectura y Operaciones — APEX ERP Enterprise
+> **Versión 2.1 Enterprise Cloud** · InfaGraSolution · Sistema de Gestión Empresarial Multi-Tenant Adaptado a Venezuela  
+> *Documentación técnica de arquitectura, base de datos, APIs, seguridad bancaria y despliegue para ingenieros y administradores de sistemas.*
 
 ---
 
@@ -10,6 +10,14 @@
 2. [Stack Tecnológico](#2-stack-tecnológico)
 3. [Estrategia Multi-Tenant y Concurrencia](#3-estrategia-multi-tenant-y-concurrencia)
 4. [Seguridad, Criptografía y Middleware RBAC](#4-seguridad-criptografía-y-middleware-rbac)
+   - 4.1. Ciclo de Vida del JWT y `session_id`
+   - 4.2. Matriz de Permisos RBAC Granulares
+   - 4.3. Prevención de Escalada de Privilegios (`is_tenant_admin`)
+   - 4.4. Mitigación de Ataques de Fuerza Bruta (Rate Limiting y Lockout)
+   - 4.5. Control de Sesión Única y Concurrencia
+   - 4.6. Cabeceras HTTP de Protección
+   - 4.7. Sanitización Global de Excepciones y Trazabilidad
+   - 4.8. Limitador de Tamaño de Payload (Anti-DoS)
 5. [Modelo de Datos y Esquemas de Base de Datos](#5-modelo-de-datos-y-esquemas-de-base-de-datos)
 6. [Catálogo de Servicios y API REST](#6-catálogo-de-servicios-y-api-rest)
 7. [Variables de Entorno y Configuración](#7-variables-de-entorno-y-configuración)
@@ -21,7 +29,7 @@
 
 ## 1. Arquitectura General y Principios de Diseño
 
-Nexus ERP está diseñado bajo un modelo **desacoplado (Decoupled Client-Server Architecture)**, separando la lógica de presentación del motor de procesamiento transaccional y persistencia.
+APEX ERP está diseñado bajo un modelo **desacoplado (Decoupled Client-Server Architecture)**, separando la lógica de presentación del motor de procesamiento transaccional y persistencia.
 
 ```mermaid
 graph TD
@@ -98,35 +106,68 @@ Nexus ERP emplea la estrategia **"Single Database, Separate Schemas"**:
 
 ## 4. Seguridad, Criptografía y Middleware RBAC
 
-### 4.1. Ciclo de Vida del JWT
-* **Access Token:** Validez de corta duración (60 minutos por defecto). Contiene en el payload:
-  * `sub`: ID del usuario.
-  * `tenant_id`: ID del inquilino.
+### 4.1. Ciclo de Vida del JWT y `session_id`
+* **Access Token:** Validez de 60 minutos. Contiene en su payload:
+  * `sub`: ID único del usuario en el sistema.
+  * `tenant_id`: ID del inquilino activo.
+  * `session_id`: UUID criptográfico generado al iniciar sesión (`uuid4`). Permite invalidar sesiones de inmediato si el usuario inicia en otra máquina o si se revoca remotamente.
+  * `is_superuser`: Bandera booleana de superadministrador global.
   * `roles`: Lista de roles asignados.
-  * `exp`: Timestamp de expiración.
-* **Refresh Token:** Validez prolongada (7 a 30 días). Permite reexpedir el access token sin forzar reingreso de credenciales si la sesión se mantiene activa.
-* **Algoritmo:** HMAC-SHA256 con clave secreta criptográfica de alta entropía (`SECRET_KEY`).
+  * `exp`: Timestamp Unix de caducidad.
+* **Refresh Token:** Validez de hasta 30 días para renovación transparente de sesión.
+* **Criptografía:** Firmado con algoritmo HMAC-SHA256 (`HS256`) utilizando una clave `SECRET_KEY` de alta entropía (mínimo 32 caracteres). Si el entorno no define una clave robusta en modo producción, el sistema genera dinámicamente un token seguro de 64 caracteres hex y bloquea configuraciones vulnerables.
 
-### 4.2. Matriz de Permisos RBAC (23 Permisos Granulares)
-El decorador `@require_permission` y la dependencia `require_module` controlan el acceso a cada endpoint:
+### 4.2. Matriz de Permisos RBAC Granulares
+El acceso a cada controlador está blindado mediante las dependencias `require_permissions` y `require_module`:
 
 | Dominio | Permisos Disponibles |
 |---------|----------------------|
-| **Ventas** | `sales:read`, `sales:write`, `sales:delete`, `sales:void` |
-| **Inventario** | `inventory:read`, `inventory:write`, `inventory:delete`, `inventory:audit` |
+| **Ventas** | `sales:read`, `sales:write`, `sales:void`, `sales:delete` |
+| **Inventario** | `inventory:read`, `inventory:write`, `inventory:transfer`, `inventory:adjust`, `inventory:charge`, `inventory:discharge`, `inventory:delete` |
 | **Compras** | `purchases:read`, `purchases:write`, `purchases:approve` |
-| **Tesorería** | `treasury:read`, `treasury:write`, `treasury:reconcile` |
-| **Caja / POS** | `cash:open`, `cash:close`, `cash:audit` |
+| **Tesorería / Caja** | `treasury:read`, `treasury:write`, `cash:open`, `cash:close`, `cash:audit` |
 | **Contabilidad** | `accounting:read`, `accounting:write` |
-| **Fiscal** | `fiscal:read`, `fiscal:export` |
-| **Sistema** | `settings:read`, `settings:write`, `audit:read` |
+| **Fiscal** | `fiscal:read`, `fiscal:write`, `fiscal:export` |
+| **Nómina (LOTTT)** | `payroll:read`, `payroll:write` |
+| **Usuarios & Roles** | `users:read`, `users:write` |
+| **Sistema & Auditoría** | `settings:read`, `settings:write`, `audit:read` |
 
-### 4.3. Cabeceras HTTP de Protección
-El servidor inyecta en cada respuesta:
-* `X-Frame-Options: DENY` (Anti Clickjacking).
-* `X-Content-Type-Options: nosniff` (Anti MIME-Sniffing).
-* `Strict-Transport-Security: max-age=31536000; includeSubDomains` (HSTS forzado).
-* `Content-Security-Policy: default-src 'self'` (Anti XSS).
+### 4.3. Prevención de Escalada de Privilegios (`is_tenant_admin`)
+Para evitar que un usuario de empresa escale sus privilegios y modifique la licencia contratada, módulos habilitados o fecha de suscripción:
+1. **Separación de Roles:** La columna `is_tenant_admin` en la tabla `public.users` distingue a los dueños de empresa de los empleados operativos y del superadministrador SaaS (`is_superuser`).
+2. **Aislamiento de Perfil de Empresa (`TenantProfileUpdate`):** El endpoint `PUT /api/v1/tenants/me` solo permite actualizar información de identidad (nombre comercial, RIF, teléfono, dirección, logo y color primario). Cualquier intento de enviar `modules`, `subscription_end`, `is_active` o `parent_id` es ignorado o rechazado con error HTTP 403.
+3. **Validación Estricta de Contraseñas:** Toda creación o modificación de clave exige una longitud mínima de 8 caracteres.
+
+### 4.4. Mitigación de Ataques de Fuerza Bruta (Rate Limiting y Lockout)
+1. **Control de Tasa por IP (`Rate Limiter`):** El endpoint `/api/v1/auth/login` restringe el tráfico a un máximo de 10 intentos por minuto por dirección IP de origen, respondiendo con HTTP 429 (`Too Many Requests`) si se supera el umbral.
+2. **Bloqueo Preventivo Automático (`Fail2Ban` en memoria):** Al registrar 3 intentos consecutivos fallidos de contraseña:
+   - La cuenta se bloquea (`is_locked = True`).
+   - El sistema almacena la marca temporal del bloqueo.
+   - Tras **15 minutos**, el bloqueo expira automáticamente, permitiendo reintentar sin necesidad de intervención técnica.
+   - El Administrador de la empresa cuenta adicionalmente con el botón de **Desbloquear Cuenta** en el panel de usuarios para atención inmediata a sus empleados.
+
+### 4.5. Control de Sesión Única y Concurrencia
+* Cada inicio de sesión exitoso almacena en el registro del usuario (`active_session_id`) un identificador único de sesión.
+* En cada petición protegida, el backend verifica que el `session_id` del token coincida con el `active_session_id` vigente en base de datos.
+* Si el mismo usuario inicia sesión en otro equipo o navegador, la sesión anterior es revocada al instante (HTTP 401: *"Sesión invalidada. Se ha iniciado sesión desde otro dispositivo"*).
+
+### 4.6. Cabeceras HTTP de Protección
+El servidor inyecta en todas las respuestas cabeceras de seguridad de nivel bancario:
+* `Strict-Transport-Security: max-age=31536000; includeSubDomains` (Obliga el uso de HTTPS estricto).
+* `X-Frame-Options: DENY` (Protección contra Clickjacking).
+* `X-Content-Type-Options: nosniff` (Inhabilita la autodetección de tipos MIME).
+* `X-XSS-Protection: 1; mode=block` (Filtro nativo contra inyección de scripts).
+* `Referrer-Policy: strict-origin-when-cross-origin` (Protección de metadatos de navegación).
+* `Content-Security-Policy: default-src 'self' ...` (Aislamiento de scripts y recursos no autorizados).
+
+### 4.7. Sanitización Global de Excepciones y Trazabilidad
+* Cualquier excepción interna imprevista (error 500) es capturada por un middleware global.
+* El traceback técnico detallado se registra en los logs del servidor junto a un código de rastreo aleatorio (`APEX-XXXXXXXX`).
+* Al cliente web se le entrega únicamente una respuesta JSON sanitizada con el identificador de soporte, impidiendo la fuga de información sensible sobre la base de datos o rutas internas de archivos.
+
+### 4.8. Limitador de Tamaño de Payload (Anti-DoS)
+* Middleware de inspección de cabecera `Content-Length`.
+* Rechaza peticiones que excedan los **15 Megabytes** con código HTTP 413 (`Payload Too Large`), previniendo saturación de memoria por subida masiva de datos maliciosos.
 
 ---
 
@@ -436,27 +477,48 @@ Cuando se introducen nuevos campos o entidades en el backend:
 
 ## 10. Mantenimiento, Respaldos y Monitoreo
 
-### 10.1. Política de Respaldos Automatizados (Backup Diario)
-Crear un cron job diario para respaldar la base de datos completa con compresión gzip:
+### 10.1. Utilidad de Respaldo Automatizado Multi-Tenant (`scripts/backup_db.py`)
+El sistema incluye un script asíncrono en Python especializado en respaldos completos o por empresa para entornos PostgreSQL tradicionales o Serverless (Neon DB):
+
 ```bash
-0 2 * * * pg_dump -U nexus_user -h localhost nexus_erp_db | gzip > /var/backups/nexus/db_$(date +\%Y\%m\%d_\%H\%M).sql.gz
+# Respaldo completo de todas las tablas públicas y todos los esquemas de empresas:
+python scripts/backup_db.py --all
+
+# Respaldo específico de una sola empresa (ejemplo: Empresa ID 2):
+python scripts/backup_db.py --tenant 2
 ```
 
-### 10.2. Restauración de Emergencia
+**Características del Respaldo:**
+* Genera archivos comprimidos `.json.gz` en el directorio `Backend/backups/`.
+* Extrae la estructura de tablas y todos los registros con serialización de tipos nativos (fechas, UUIDs, decimales y booleanos).
+* Nomenclatura automática con timestamp: `apex_backup_full_YYYYMMDD_HHMMSS.json.gz`.
+* El directorio `backups/` está explícitamente excluido del control de versiones (`.gitignore`) para evitar filtración accidental de información comercial.
+
+### 10.2. Respaldo Nativo de PostgreSQL (`pg_dump`)
+Para respaldos binarios o de volcado SQL completo a nivel de sistema operativo:
 ```bash
-gunzip -c /var/backups/nexus/db_20261021_0200.sql.gz | psql -U nexus_user -d nexus_erp_db
+0 2 * * * pg_dump "$DATABASE_URL" | gzip > /var/backups/apex/apex_db_$(date +\%Y\%m\%d_\%H\%M).sql.gz
 ```
 
-### 10.3. Monitoreo de Procesos y Logs
+### 10.3. Restauración de Emergencia
+```bash
+# Restauración a partir de volcado SQL comprimido:
+gunzip -c /var/backups/apex/apex_db_20261108_0200.sql.gz | psql "$DATABASE_URL"
+```
+
+### 10.4. Monitoreo de Procesos y Logs de Auditoría
 * **Logs del Backend en tiempo real:**
   ```bash
-  sudo journalctl -u nexus-backend -f
+  sudo journalctl -u apex-backend -f
   ```
 * **Logs de acceso y errores de Nginx:**
   ```bash
   tail -f /var/log/nginx/access.log
   tail -f /var/log/nginx/error.log
   ```
+* **Punto de Estado del Servicio (Healthcheck):**
+  - Endpoint: `GET /health`
+  - Respuesta: `{"status": "ok", "app": "APEX ERP", "version": "2.1.0"}`
 
 ---
-*Manual Técnico de Arquitectura y Operaciones — Nexus ERP Enterprise © 2026 Infagra Solution.*
+*Manual Técnico de Arquitectura y Operaciones — APEX ERP Enterprise Cloud © 2026 InfaGraSolution.*

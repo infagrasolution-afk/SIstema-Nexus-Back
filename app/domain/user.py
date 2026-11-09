@@ -12,6 +12,7 @@ class User(Base, TimestampMixin, TenantMixin, AuditMixin):
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
+    is_tenant_admin = Column(Boolean, default=False)  # Administrador de la empresa/sucursal
     modules = Column(String, nullable=True)  # e.g. "sales,inventory"
     role_id = Column(Integer, ForeignKey("roles.id", ondelete="SET NULL"), nullable=True)
 

@@ -32,6 +32,27 @@ class TenantUpdate(TenantBase):
     name: Optional[str] = None
     is_active: Optional[bool] = None
 
+class TenantProfileUpdate(BaseModel):
+    """Campos seguros que una empresa puede editar sobre sí misma (sin alterar módulos o licencias)."""
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    settings: Optional[Any] = None
+
+    @field_validator('settings', mode='before')
+    @classmethod
+    def parse_settings_field(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return v
+        return v
+
 class TenantResponse(TenantBase):
     id: int
     license_key: Optional[str] = None

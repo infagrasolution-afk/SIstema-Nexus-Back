@@ -9,6 +9,7 @@ class UserBase(BaseModel):
     email: Optional[EmailStr] = None
     is_active: Optional[bool] = True
     is_superuser: Optional[bool] = False
+    is_tenant_admin: Optional[bool] = False
     modules: Optional[str] = None   # Módulos del tenant que puede ver: "sales,inventory"
 
 
@@ -24,6 +25,7 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
+    is_tenant_admin: Optional[bool] = None
     modules: Optional[str] = None
     role_id: Optional[int] = None
     permission_ids: Optional[List[int]] = None
