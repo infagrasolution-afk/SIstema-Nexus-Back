@@ -20,6 +20,7 @@ from app.schemas.inventory import (
     InitialStockImport
 )
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module, require_permissions
+from app.domain.user import User
 from pydantic import BaseModel
 
 class RateUpdate(BaseModel):
