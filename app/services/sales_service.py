@@ -80,6 +80,12 @@ class SalesService:
         db.add(new_sale)
         await db.flush()
 
+        # Asignación automática de correlativos fiscales SENIAT si no se enviaron manualmente
+        if not new_sale.fiscal_invoice_number:
+            new_sale.fiscal_invoice_number = f"{new_sale.id:08d}"
+        if not new_sale.control_number:
+            new_sale.control_number = f"00-{new_sale.id:08d}"
+
         for detail in sale_in.details:
             qty = Decimal(str(detail.quantity))
             u_price = Decimal(str(detail.unit_price))
@@ -178,6 +184,35 @@ class SalesService:
         await db.commit()
         await db.refresh(new_sale)
         await db.refresh(new_sale, ["details"])
+
+        # ── Envío automático a la API REST del Proveedor de Factura Digital (si está activo) ──
+        if new_sale.status == "COMPLETED":
+            try:
+                from sqlalchemy.orm import selectinload
+                from app.domain.tenant import Tenant
+                from app.services.digital_invoice_service import DigitalInvoiceService
+
+                t_res = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+                tenant_obj = t_res.scalars().first()
+                api_cfg = ((tenant_obj.settings or {}).get("digital_invoice_api") if tenant_obj and isinstance(tenant_obj.settings, dict) else {}) or {}
+
+                if api_cfg.get("enabled") and api_cfg.get("auto_send_on_sale") and api_cfg.get("endpoint_url"):
+                    full_sale_res = await db.execute(
+                        select(Sale)
+                        .where(Sale.id == new_sale.id)
+                        .options(
+                            selectinload(Sale.details).selectinload(SaleDetail.product),
+                            selectinload(Sale.customer),
+                            selectinload(Sale.tenant),
+                        )
+                    )
+                    full_sale = full_sale_res.scalars().first()
+                    if full_sale:
+                        await DigitalInvoiceService.transmit_to_provider_api(db, full_sale, tenant_obj)
+                        await db.refresh(new_sale)
+            except Exception as api_err:
+                print(f"Notice: Auto-send digital invoice API skipped/failed: {api_err}")
+
         return new_sale
 
     @staticmethod

@@ -39,6 +39,8 @@ class ProductBase(BaseModel):
     sku: str
     barcode: Optional[str] = None
     price: Decimal
+    price_2: Optional[Decimal] = Decimal('0.0000')
+    price_3: Optional[Decimal] = Decimal('0.0000')
     cost: Decimal = Decimal('0.0000')
     average_cost: Decimal = Decimal('0.0000')
     tax_exempt: bool = False
@@ -62,6 +64,8 @@ class ProductUpdate(BaseModel):
     sku: Optional[str] = None
     barcode: Optional[str] = None
     price: Optional[Decimal] = None
+    price_2: Optional[Decimal] = None
+    price_3: Optional[Decimal] = None
     cost: Optional[Decimal] = None
     average_cost: Optional[Decimal] = None
     tax_exempt: Optional[bool] = None
@@ -87,6 +91,8 @@ class InitialStockImport(BaseModel):
     name: str
     cost: Decimal = Decimal('0.0000')
     price: Decimal = Decimal('0.0000')
+    price_2: Optional[Decimal] = Decimal('0.0000')
+    price_3: Optional[Decimal] = Decimal('0.0000')
     quantity: Decimal
     warehouse_id: int
 

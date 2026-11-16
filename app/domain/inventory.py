@@ -74,8 +74,10 @@ class Product(Base, TimestampMixin, TenantMixin, AuditMixin):
     description = Column(String, nullable=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     
-    # Precios — NUMERIC(18,4) para precisión financiera
-    price = Column(Numeric(18, 4), default=0.0)
+    # Precios — NUMERIC(18,4) para precisión financiera (3 niveles de precio: P1 por defecto, P2, P3)
+    price = Column(Numeric(18, 4), default=0.0)    # Precio 1 (Por defecto / Detal)
+    price_2 = Column(Numeric(18, 4), default=0.0)  # Precio 2 (Mayor / Especial)
+    price_3 = Column(Numeric(18, 4), default=0.0)  # Precio 3 (Distribuidor / VIP)
     cost = Column(Numeric(18, 4), default=0.0)
     average_cost = Column(Numeric(18, 4), default=0.0)
     margin_percent = Column(Numeric(8, 2), default=0.0)  # Margen de ganancia en %

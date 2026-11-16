@@ -10,11 +10,15 @@ import app.domain
 TENANT_SCHEMA_MIGRATIONS = """
 -- 1. Products: Nuevos campos y conversión a NUMERIC
 ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode VARCHAR(100);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS price_2 NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS price_3 NUMERIC(18, 4) DEFAULT 0.0000;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS tax_exempt BOOLEAN DEFAULT FALSE;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(18, 4) DEFAULT 16.0000;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS margin_percent NUMERIC(18, 4) DEFAULT 30.0000;
 DO $$ BEGIN
     ALTER TABLE products ALTER COLUMN price TYPE NUMERIC(18, 4) USING price::numeric(18, 4);
+    ALTER TABLE products ALTER COLUMN price_2 TYPE NUMERIC(18, 4) USING price_2::numeric(18, 4);
+    ALTER TABLE products ALTER COLUMN price_3 TYPE NUMERIC(18, 4) USING price_3::numeric(18, 4);
     ALTER TABLE products ALTER COLUMN cost TYPE NUMERIC(18, 4) USING cost::numeric(18, 4);
     ALTER TABLE products ALTER COLUMN average_cost TYPE NUMERIC(18, 4) USING average_cost::numeric(18, 4);
     ALTER TABLE products ALTER COLUMN min_stock TYPE NUMERIC(18, 4) USING min_stock::numeric(18, 4);
@@ -273,6 +277,18 @@ async def update_all_databases():
                         await conn.execute(text(TENANT_SCHEMA_MIGRATIONS))
                     except Exception as mig_err:
                         print(f"Migration script notice for Tenant {tenant.id}: {mig_err}")
+
+                # 4. Si es la empresa DEMO, asegurar que tenga la información de inducción precargada
+                if "demo" in (tenant.name or "").lower():
+                    try:
+                        from sqlalchemy.ext.asyncio import async_sessionmaker
+                        from app.services.demo_seed_service import DemoSeedService
+                        TenantSession = async_sessionmaker(bind=engine, expire_on_commit=False)
+                        async with TenantSession() as t_session:
+                            await DemoSeedService.seed_demo_company_data(t_session, session, tenant.id)
+                            print(f"Demo data seeded/verified for Tenant {tenant.id} ({tenant.name}).")
+                    except Exception as seed_err:
+                        print(f"Demo seed notice for Tenant {tenant.id}: {seed_err}")
                         
         print("PostgreSQL tenant databases and schemas updated successfully!")
     except Exception as e:

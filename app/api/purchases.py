@@ -3,6 +3,7 @@ API de Compras — Módulo completo con flujo DRAFT → APPROVED → RECEIVED.
 Incluye filtros, búsqueda, cancelación y actualización de órdenes.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
@@ -11,11 +12,13 @@ from datetime import datetime
 
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module
 from app.services.purchase_service import PurchaseService
+from app.services.pdf_service import PDFService
 from app.schemas.purchases import (
     PurchaseCreate, PurchaseResponse, PurchaseUpdate,
     PurchaseReceiveIn
 )
-from app.domain.purchases import Purchase, PurchaseStatus, Supplier
+from app.domain.purchases import Purchase, PurchaseStatus, Supplier, PurchaseDetail
+from app.domain.tenant import Tenant
 
 router = APIRouter()
 
@@ -240,3 +243,35 @@ async def cancel_purchase(
         "message": f"OC #{purchase_id} cancelada",
         "reverted_inventory": prev_status == PurchaseStatus.COMPLETED
     }
+
+
+@router.get("/{purchase_id}/pdf")
+async def get_purchase_order_pdf(
+    purchase_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+    _: bool = Depends(require_module("purchases")),
+):
+    """Genera el documento PDF formal de Orden de Compra con el logo y datos fiscales de la empresa."""
+    result = await db.execute(
+        select(Purchase)
+        .where(Purchase.id == purchase_id, Purchase.tenant_id == tenant_id)
+        .options(
+            selectinload(Purchase.details).selectinload(PurchaseDetail.product),
+            selectinload(Purchase.supplier),
+        )
+    )
+    purchase = result.scalars().first()
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
+
+    tenant_res = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = tenant_res.scalars().first()
+
+    pdf_buffer = PDFService.generate_purchase_order(purchase, tenant)
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=orden_compra_{purchase_id:06d}.pdf"},
+    )
+

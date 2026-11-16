@@ -1,149 +1,292 @@
 import io
+import base64
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
-from reportlab.lib.units import inch
+from reportlab.lib.units import inch, mm
+from reportlab.lib.utils import ImageReader
 from app.domain.sales import Sale
 
 class PDFService:
     @staticmethod
+    def _draw_tenant_logo(p: canvas.Canvas, tenant_or_url, x: float = 0.6 * inch, y: float = 0.0, max_w: float = 1.3 * inch, max_h: float = 0.75 * inch) -> bool:
+        """Dibuja el logo de la empresa soportando tanto Base64 Data-URL como rutas/URLs."""
+        if not tenant_or_url:
+            return False
+        if isinstance(tenant_or_url, str):
+            logo_url = tenant_or_url.strip()
+        else:
+            logo_url = (getattr(tenant_or_url, "logo_url", None) or "").strip()
+        if not logo_url:
+            return False
+        try:
+            if logo_url.startswith("data:image"):
+                header, encoded = logo_url.split(",", 1)
+                img_bytes = base64.b64decode(encoded)
+                img_reader = ImageReader(io.BytesIO(img_bytes))
+                p.drawImage(img_reader, x, y, width=max_w, height=max_h, preserveAspectRatio=True, anchor='nw', mask='auto')
+                return True
+            else:
+                p.drawImage(logo_url, x, y, width=max_w, height=max_h, preserveAspectRatio=True, anchor='nw', mask='auto')
+                return True
+        except Exception as e:
+            print(f"Notice loading tenant logo for PDF: {e}")
+            return False
+
+    @staticmethod
     def generate_invoice(sale: Sale) -> io.BytesIO:
+        """
+        Genera Factura Fiscal / Digital conforme a las Providencias Administrativas
+        del SENIAT en Venezuela (SNAT/2011/00071 y SNAT/2014/0032) y Ley de IGTF.
+        Incluye logo de la empresa, RIF, N° de Factura, N° de Control, Base Imponible,
+        Exento, IVA (16%), IGTF (3%) y equivalencia bimonetaria a tasa BCV.
+        """
         buffer = io.BytesIO()
         p = canvas.Canvas(buffer, pagesize=letter)
         width, height = letter
         
-        # Primary Color from Tenant
-        primary_color_hex = sale.tenant.primary_color if sale.tenant and sale.tenant.primary_color else "#2563eb"
+        tenant = sale.tenant
+        primary_color_hex = tenant.primary_color if tenant and tenant.primary_color else "#1e3a8a"
         try:
             brand_color = colors.HexColor(primary_color_hex)
-        except:
-            brand_color = colors.HexColor("#2563eb")
+        except Exception:
+            brand_color = colors.HexColor("#1e3a8a")
 
-        # Logo and Header
-        y_header = height - 0.8 * inch
-        if sale.tenant and sale.tenant.logo_url:
-            try:
-                # Note: ReportLab might need an external library for some image formats, 
-                # but for standard URLs/Paths it should work if accessible.
-                p.drawImage(sale.tenant.logo_url, 1 * inch, height - 1.2 * inch, width=1.5*inch, preserveAspectRatio=True, mask='auto')
-                y_header = height - 1.3 * inch
-            except Exception as e:
-                print(f"Error loading logo for PDF: {e}")
-                p.setFont("Helvetica-Bold", 20)
-                p.setFillColor(brand_color)
-                p.drawString(1 * inch, y_header, sale.tenant.name if sale.tenant else "APEX ERP")
-                y_header -= 0.3 * inch
-        else:
-            p.setFont("Helvetica-Bold", 20)
-            p.setFillColor(brand_color)
-            p.drawString(1 * inch, y_header, sale.tenant.name if sale.tenant else "APEX ERP")
-            y_header -= 0.3 * inch
-        
-        p.setFillColor(colors.black)
-        p.setFont("Helvetica", 9)
-        if sale.tenant and sale.tenant.tax_id:
-            p.drawString(1 * inch, y_header, f"RIF/Tax ID: {sale.tenant.tax_id}")
-            y_header -= 0.15 * inch
-        if sale.tenant and sale.tenant.address:
-            p.drawString(1 * inch, y_header, f"Dirección: {sale.tenant.address}")
-            y_header -= 0.15 * inch
-        if sale.tenant and sale.tenant.phone:
-            p.drawString(1 * inch, y_header, f"Teléfono: {sale.tenant.phone}")
+        # ── 1. ENCABEZADO EMISOR Y LOGO DE LA EMPRESA ─────────────────────────
+        y_top = height - 0.6 * inch
+        logo_drawn = PDFService._draw_tenant_logo(p, tenant, 0.6 * inch, height - 1.35 * inch, 1.3 * inch, 0.75 * inch)
+        text_x = (2.0 * inch) if logo_drawn else (0.6 * inch)
 
-        # Invoice Info (Right side)
         p.setFillColor(brand_color)
         p.setFont("Helvetica-Bold", 14)
-        p.drawRightString(7.5 * inch, height - 0.8 * inch, "FACTURA DE VENTA")
-        p.setFillColor(colors.black)
-        p.setFont("Helvetica", 10)
-        p.drawRightString(7.5 * inch, height - 1.0 * inch, f"Nro: {str(sale.id).zfill(6)}")
-        p.drawRightString(7.5 * inch, height - 1.2 * inch, f"Fecha: {sale.created_at.strftime('%d/%m/%Y')}")
+        company_name = (tenant.name if tenant and tenant.name else "EMPRESA EMISORA").upper()
+        p.drawString(text_x, y_top - 0.15 * inch, company_name[:42])
 
-        # Customer Info
-        p.setFont("Helvetica-Bold", 11)
-        p.drawString(1 * inch, height - 2.2 * inch, "CLIENTE:")
-        p.setFont("Helvetica", 10)
-        customer = sale.customer
-        if customer:
-            p.drawString(1 * inch, height - 2.4 * inch, f"Nombre: {customer.name}")
-            p.drawString(1 * inch, height - 2.55 * inch, f"RIF/CI: {customer.tax_id}")
-            if customer.address:
-                p.drawString(1 * inch, height - 2.7 * inch, f"Dirección: {customer.address}")
-        else:
-            p.drawString(1 * inch, height - 2.4 * inch, "Consumidor Final")
+        p.setFillColor(colors.HexColor("#1e293b"))
+        p.setFont("Helvetica-Bold", 9)
+        rif_str = tenant.tax_id.upper() if tenant and tenant.tax_id else "J-00000000-0"
+        p.drawString(text_x, y_top - 0.32 * inch, f"R.I.F.: {rif_str}")
 
-        # Table Header
+        p.setFont("Helvetica", 8)
+        addr_str = tenant.address if tenant and tenant.address else "Domicilio Fiscal: Venezuela"
+        p.drawString(text_x, y_top - 0.46 * inch, f"Domicilio Fiscal: {addr_str[:65]}")
+        if len(addr_str) > 65:
+            p.drawString(text_x, y_top - 0.58 * inch, addr_str[65:130])
+
+        phone_str = tenant.phone if tenant and tenant.phone else "N/A"
+        email_str = tenant.email if tenant and tenant.email else ""
+        contact_line = f"Teléfono: {phone_str}" + (f"  |  Email: {email_str}" if email_str else "")
+        p.drawString(text_x, y_top - 0.72 * inch, contact_line[:75])
+
+        # ── 2. CUADRO FISCAL DE NUMERACIÓN SENIAT (DERECHA) ───────────────────
+        box_x = width - 3.05 * inch
+        box_y = height - 1.48 * inch
         p.setStrokeColor(brand_color)
-        p.line(1 * inch, height - 3.1 * inch, 7.5 * inch, height - 3.1 * inch)
-        p.setFont("Helvetica-Bold", 10)
-        p.drawString(1 * inch, height - 3.25 * inch, "Descripción")
-        p.drawString(4.5 * inch, height - 3.25 * inch, "Cant")
-        p.drawString(5.5 * inch, height - 3.25 * inch, "Precio Unit. (Bs.)")
-        p.drawString(6.8 * inch, height - 3.25 * inch, "Total (Bs.)")
-        p.line(1 * inch, height - 3.35 * inch, 7.5 * inch, height - 3.35 * inch)
+        p.setFillColor(colors.HexColor("#f8fafc"))
+        p.roundRect(box_x, box_y, 2.45 * inch, 0.92 * inch, 6, fill=1, stroke=1)
 
-        # Table Content
-        y = height - 3.55 * inch
-        p.setFont("Helvetica", 10)
-        for detail in sale.details:
-            product_name = getattr(detail.product, 'name', f"Producto {detail.product_id}")
-            p.drawString(1 * inch, y, product_name[:40])
-            p.drawRightString(4.8 * inch, y, str(detail.quantity))
-            p.drawRightString(6.3 * inch, y, f"{detail.unit_price:,.2f} Bs.")
-            p.drawRightString(7.5 * inch, y, f"{detail.subtotal:,.2f} Bs.")
-            y -= 0.25 * inch
-            
-            if y < 1.5 * inch:
-                p.showPage()
-                y = height - 1 * inch
-                p.setFont("Helvetica", 10)
+        inv_num = sale.fiscal_invoice_number or f"{sale.id:08d}"
+        ctrl_num = sale.control_number or f"00-{sale.id:08d}"
+        dt_str = sale.created_at.strftime('%d/%m/%Y %H:%M') if sale.created_at else ""
 
-        # Totals
-        y -= 0.2 * inch
-        p.setStrokeColor(colors.lightgrey)
-        p.line(5 * inch, y, 7.5 * inch, y)
-        y -= 0.25 * inch
-        p.setFont("Helvetica", 10)
-        p.drawString(5 * inch, y, "Subtotal:")
-        p.drawRightString(7.5 * inch, y, f"{sale.subtotal:,.2f} Bs.")
-        
-        # Venezuelan Fiscal Taxes Separation
-        standard_iva = sale.subtotal * 0.16
-        igtf_total = sale.tax_total - standard_iva if sale.currency == "USD" else 0.0
-        
-        y -= 0.2 * inch
-        p.drawString(5 * inch, y, "IVA (16%):")
-        p.drawRightString(7.5 * inch, y, f"{standard_iva:,.2f} Bs.")
-        
-        if igtf_total > 0.01:
-            y -= 0.2 * inch
-            p.drawString(5 * inch, y, "IGTF (3%):")
-            p.drawRightString(7.5 * inch, y, f"{igtf_total:,.2f} Bs.")
-        
-        y -= 0.4 * inch
         p.setFillColor(brand_color)
-        p.setFont("Helvetica-Bold", 14)
-        p.drawString(5 * inch, y, "TOTAL:")
-        p.drawRightString(7.5 * inch, y, f"{sale.total:,.2f} Bs.")
+        p.setFont("Helvetica-Bold", 12)
+        p.drawCentredString(box_x + 1.225 * inch, box_y + 0.72 * inch, "FACTURA")
 
-        # Show equivalence in USD if transaction was in USD or exchange rate is set
-        if sale.exchange_rate and sale.exchange_rate > 1:
-            y -= 0.22 * inch
-            p.setFont("Helvetica-Oblique", 9)
-            p.setFillColor(colors.black)
-            p.drawString(5 * inch, y, f"Tasa BCV del día:")
-            p.drawRightString(7.5 * inch, y, f"{sale.exchange_rate:,.2f} Bs/$")
-            
-            y -= 0.18 * inch
-            total_usd = sale.total / sale.exchange_rate
-            p.drawString(5 * inch, y, f"Total Ref. USD:")
-            p.drawRightString(7.5 * inch, y, f"${total_usd:,.2f}")
-
-        # Footer
         p.setFillColor(colors.black)
-        p.setFont("Helvetica-Oblique", 8)
-        p.drawCentredString(width / 2, 0.7 * inch, "¡Gracias por su compra!")
-        p.drawCentredString(width / 2, 0.5 * inch, "Generado por APEX ERP - Sistema Multi-Tenant")
+        p.setFont("Helvetica-Bold", 8.5)
+        p.drawString(box_x + 0.12 * inch, box_y + 0.52 * inch, "N° DE FACTURA:")
+        p.setFillColor(colors.HexColor("#dc2626"))
+        p.drawRightString(box_x + 2.33 * inch, box_y + 0.52 * inch, str(inv_num))
+
+        p.setFillColor(colors.black)
+        p.drawString(box_x + 0.12 * inch, box_y + 0.36 * inch, "N° DE CONTROL:")
+        p.setFont("Helvetica-Bold", 8.5)
+        p.drawRightString(box_x + 2.33 * inch, box_y + 0.36 * inch, str(ctrl_num))
+
+        p.setFont("Helvetica", 7.5)
+        p.drawString(box_x + 0.12 * inch, box_y + 0.20 * inch, "Fecha y Hora Emisión:")
+        p.drawRightString(box_x + 2.33 * inch, box_y + 0.20 * inch, dt_str)
+
+        payment_map = {
+            "cash": "Contado / Efectivo",
+            "card": "Contado / Punto de Venta",
+            "transfer": "Contado / Transferencia / Pago Móvil",
+            "credit": "Crédito Comercial",
+            "zelle": "Contado / Divisas (Zelle)"
+        }
+        pay_label = payment_map.get(sale.payment_method or "cash", sale.payment_method or "Contado")
+        p.drawString(box_x + 0.12 * inch, box_y + 0.06 * inch, f"Condición: {pay_label[:26]}")
+
+        # ── 3. DATOS DEL CLIENTE / ADQUIRENTE (EXIGIDO POR SENIAT) ────────────
+        cust_y = height - 2.25 * inch
+        p.setStrokeColor(colors.HexColor("#cbd5e1"))
+        p.setFillColor(colors.HexColor("#f1f5f9"))
+        p.roundRect(0.6 * inch, cust_y, width - 1.2 * inch, 0.65 * inch, 5, fill=1, stroke=1)
+
+        customer = sale.customer
+        cust_name = customer.name if customer and customer.name else "CONSUMIDOR FINAL"
+        cust_rif = customer.tax_id if customer and customer.tax_id else "V-00000000-0"
+        cust_addr = customer.address if customer and customer.address else "Venezuela"
+        cust_phone = customer.phone if customer and customer.phone else "N/A"
+
+        p.setFillColor(colors.HexColor("#0f172a"))
+        p.setFont("Helvetica-Bold", 8.5)
+        p.drawString(0.75 * inch, cust_y + 0.45 * inch, f"NOMBRE O RAZÓN SOCIAL: {cust_name[:52].upper()}")
+        p.drawString(5.1 * inch, cust_y + 0.45 * inch, f"R.I.F. / C.I.: {cust_rif.upper()}")
+
+        p.setFont("Helvetica", 8)
+        p.drawString(0.75 * inch, cust_y + 0.26 * inch, f"DOMICILIO FISCAL: {cust_addr[:70]}")
+        p.drawString(5.1 * inch, cust_y + 0.26 * inch, f"TELÉFONO: {cust_phone}")
+
+        rate = float(sale.exchange_rate) if sale.exchange_rate and float(sale.exchange_rate) > 0 else 1.0
+        curr_code = "VES" if sale.currency in ["LOCAL", "VES"] else "USD"
+        p.drawString(0.75 * inch, cust_y + 0.08 * inch, f"Moneda de Operación: {curr_code}  |  Tasa Oficial BCV Aplicada: {rate:,.2f} Bs/$")
+
+        # ── 4. TABLA DE ÍTEMS FACTURADOS ──────────────────────────────────────
+        tbl_top = cust_y - 0.18 * inch
+        p.setFillColor(brand_color)
+        p.rect(0.6 * inch, tbl_top - 0.22 * inch, width - 1.2 * inch, 0.22 * inch, fill=1, stroke=0)
+
+        p.setFillColor(colors.white)
+        p.setFont("Helvetica-Bold", 7.5)
+        hdr_y = tbl_top - 0.15 * inch
+        p.drawString(0.68 * inch, hdr_y, "CÓDIGO")
+        p.drawString(1.55 * inch, hdr_y, "DESCRIPCIÓN DEL BIEN O SERVICIO")
+        p.drawRightString(4.65 * inch, hdr_y, "CANT.")
+        p.drawCentredString(5.05 * inch, hdr_y, "ALÍC.")
+        p.drawRightString(6.05 * inch, hdr_y, f"P. UNIT ({curr_code})")
+        p.drawRightString(6.75 * inch, hdr_y, "DESC.")
+        p.drawRightString(7.82 * inch, hdr_y, f"SUBTOTAL ({curr_code})")
+
+        y = tbl_top - 0.38 * inch
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica", 8)
+
+        exempt_total = 0.0
+        taxable_base = 0.0
+
+        for detail in sale.details:
+            prod = detail.product
+            sku = getattr(prod, 'sku', f"P-{detail.product_id}") if prod else f"P-{detail.product_id}"
+            product_name = getattr(prod, 'name', f"Producto {detail.product_id}") if prod else f"Producto {detail.product_id}"
+            is_exempt = bool(getattr(prod, 'tax_exempt', False)) if prod else False
+            tax_indicator = "(E)" if is_exempt else "(G 16%)"
+
+            qty = float(detail.quantity or 0)
+            u_price = float(detail.unit_price or 0)
+            disc_pct = float(getattr(detail, 'discount_percent', 0) or 0)
+            line_sub = float(detail.subtotal or (qty * u_price))
+
+            if is_exempt:
+                exempt_total += line_sub
+            else:
+                taxable_base += line_sub
+
+            p.drawString(0.68 * inch, y, str(sku)[:12])
+            p.drawString(1.55 * inch, y, str(product_name)[:44])
+            p.drawRightString(4.65 * inch, y, f"{qty:,.2f}")
+            p.drawCentredString(5.05 * inch, y, tax_indicator)
+            p.drawRightString(6.05 * inch, y, f"{u_price:,.2f}")
+            p.drawRightString(6.75 * inch, y, f"{disc_pct:.0f}%" if disc_pct > 0 else "—")
+            p.drawRightString(7.82 * inch, y, f"{line_sub:,.2f}")
+
+            p.setStrokeColor(colors.HexColor("#e2e8f0"))
+            p.line(0.6 * inch, y - 0.06 * inch, width - 0.6 * inch, y - 0.06 * inch)
+            y -= 0.22 * inch
+
+            if y < 2.6 * inch:
+                p.showPage()
+                y = height - 1.0 * inch
+                p.setFont("Helvetica", 8)
+
+        # ── 5. DESGLOSE TRIBUTARIO SENIAT Y EQUIVALENCIA BCV ──────────────────
+        y_tot = min(y - 0.15 * inch, 2.75 * inch)
+        p.setStrokeColor(brand_color)
+        p.line(0.6 * inch, y_tot + 0.1 * inch, width - 0.6 * inch, y_tot + 0.1 * inch)
+
+        subtotal_f = float(sale.subtotal or 0.0)
+        igtf_f = float(sale.igtf_amount or 0.0)
+        raw_tax_total = float(sale.tax_total or 0.0)
+        # En SalesService, tax_total almacena IVA + IGTF; separamos IVA puro para claridad SENIAT
+        iva_f = max(0.0, raw_tax_total - igtf_f) if raw_tax_total >= igtf_f else (taxable_base * 0.16)
+        total_f = float(sale.total or 0.0)
+
+        # Columna Izquierda: Nota legal BCV y SENIAT + Cuadro de Equivalencia en Bolívares
+        p.setFillColor(colors.HexColor("#f8fafc"))
+        p.setStrokeColor(colors.HexColor("#cbd5e1"))
+        p.roundRect(0.6 * inch, y_tot - 1.15 * inch, 3.8 * inch, 1.15 * inch, 5, fill=1, stroke=1)
+
+        p.setFillColor(brand_color)
+        p.setFont("Helvetica-Bold", 8)
+        p.drawString(0.72 * inch, y_tot - 0.18 * inch, "EQUIVALENCIA OFICIAL EN BOLÍVARES (BCV):")
+
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica", 7.5)
+        if curr_code == "USD":
+            sub_bs = subtotal_f * rate
+            iva_bs = iva_f * rate
+            igtf_bs = igtf_f * rate
+            tot_bs = total_f * rate
+        else:
+            sub_bs = subtotal_f
+            iva_bs = iva_f
+            igtf_bs = igtf_f
+            tot_bs = total_f
+
+        p.drawString(0.72 * inch, y_tot - 0.34 * inch, f"• Base Imponible en Bs.: Bs. {sub_bs:,.2f}")
+        p.drawString(0.72 * inch, y_tot - 0.48 * inch, f"• I.V.A. (16%) en Bs.: Bs. {iva_bs:,.2f}")
+        if igtf_bs > 0.001:
+            p.drawString(0.72 * inch, y_tot - 0.62 * inch, f"• I.G.T.F. (3%) en Bs.: Bs. {igtf_bs:,.2f}")
+        p.setFont("Helvetica-Bold", 8.5)
+        p.drawString(0.72 * inch, y_tot - 0.80 * inch, f"• TOTAL EN BOLÍVARES: Bs. {tot_bs:,.2f} (Tasa BCV: {rate:,.2f} Bs/$)")
+
+        p.setFont("Helvetica-Oblique", 6.5)
+        p.setFillColor(colors.HexColor("#475569"))
+        p.drawString(0.72 * inch, y_tot - 1.02 * inch, "Art. 25 Ley de IVA / Art. 128 Ley del BCV: Pagos en Bs. a la tasa BCV vigente.")
+
+        # Columna Derecha: Totales del Documento
+        col_lbl = 4.65 * inch
+        col_val = width - 0.65 * inch
+        row_y = y_tot - 0.12 * inch
+
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica", 8.5)
+        p.drawString(col_lbl, row_y, "Total Ventas Exentas (E):")
+        p.drawRightString(col_val, row_y, f"{exempt_total:,.2f} {curr_code}")
+
+        row_y -= 0.18 * inch
+        p.drawString(col_lbl, row_y, "Base Imponible (G 16%):")
+        p.drawRightString(col_val, row_y, f"{taxable_base:,.2f} {curr_code}")
+
+        row_y -= 0.18 * inch
+        p.drawString(col_lbl, row_y, "Impuesto I.V.A. (16%):")
+        p.drawRightString(col_val, row_y, f"{iva_f:,.2f} {curr_code}")
+
+        if igtf_f > 0.001:
+            row_y -= 0.18 * inch
+            p.setFillColor(colors.HexColor("#b45309"))
+            p.setFont("Helvetica-Bold", 8.5)
+            p.drawString(col_lbl, row_y, "I.G.T.F. (3% Pago en Divisas):")
+            p.drawRightString(col_val, row_y, f"{igtf_f:,.2f} {curr_code}")
+
+        row_y -= 0.26 * inch
+        p.setFillColor(brand_color)
+        p.rect(col_lbl - 0.08 * inch, row_y - 0.06 * inch, (col_val - col_lbl) + 0.14 * inch, 0.26 * inch, fill=1, stroke=0)
+        p.setFillColor(colors.white)
+        p.setFont("Helvetica-Bold", 10.5)
+        p.drawString(col_lbl, row_y + 0.02 * inch, "TOTAL A PAGAR:")
+        p.drawRightString(col_val, row_y + 0.02 * inch, f"{total_f:,.2f} {curr_code}")
+
+        # ── 6. PIE DE IMPRENTA / CONFORMIDAD SENIAT ───────────────────────────
+        p.setFillColor(colors.HexColor("#475569"))
+        p.setFont("Helvetica", 7)
+        p.drawCentredString(
+            width / 2, 0.72 * inch,
+            f"Documento emitido conforme a las Providencias Administrativas SENIAT SNAT/2011/00071 y SNAT/2014/0032. Control N° {ctrl_num}."
+        )
+        p.setFont("Helvetica-Oblique", 7)
+        p.drawCentredString(width / 2, 0.55 * inch, "¡Gracias por su compra! — Emitido mediante plataforma APEX ERP")
 
         p.showPage()
         p.save()
@@ -154,155 +297,177 @@ class PDFService:
     def generate_thermal_ticket(sale: Sale, width_mm: int = 80) -> io.BytesIO:
         """
         Genera el Ticket Térmico de Venta para impresoras POS de 80mm o 58mm.
-        Incluye desglose bimonetario (Bs / USD), IGTF 3%, y datos fiscales SENIAT.
+        Incluye logo de la empresa, desglose bimonetario (Bs / USD), IGTF 3% y datos fiscales SENIAT.
         """
-        from reportlab.lib.units import mm
-        from decimal import Decimal
-
         buffer = io.BytesIO()
         width = width_mm * mm
-        # Altura dinámica: ~140mm base + 8mm por cada renglón
         num_items = len(sale.details) if sale.details else 1
-        height = max(180 * mm, (130 + num_items * 8) * mm)
+        height = max(200 * mm, (155 + num_items * 9) * mm)
 
         p = canvas.Canvas(buffer, pagesize=(width, height))
-        y = height - 8 * mm
+        y = height - 6 * mm
+
+        tenant = sale.tenant
+        # Intentar dibujar logo centrado si existe
+        if tenant and getattr(tenant, "logo_url", None):
+            logo_w = 26 * mm
+            logo_h = 14 * mm
+            if PDFService._draw_tenant_logo(p, tenant, (width - logo_w) / 2, y - logo_h, logo_w, logo_h):
+                y -= (logo_h + 4 * mm)
 
         # ── ENCABEZADO FISCAL (Centrado) ──────────────────────────────────────
-        tenant = sale.tenant
-        company_name = tenant.name if tenant else "EMPRESA"
-        p.setFont("Helvetica-Bold", 10)
-        p.drawCentredString(width / 2, y, company_name[:28].upper())
-        y -= 4 * mm
+        company_name = tenant.name if tenant and tenant.name else "EMPRESA"
+        p.setFont("Helvetica-Bold", 9.5)
+        p.drawCentredString(width / 2, y, company_name[:30].upper())
+        y -= 3.8 * mm
 
-        p.setFont("Helvetica", 7.5)
+        p.setFont("Helvetica-Bold", 7.5)
         if tenant and tenant.tax_id:
-            p.drawCentredString(width / 2, y, f"RIF: {tenant.tax_id.upper()}")
-            y -= 3.5 * mm
+            p.drawCentredString(width / 2, y, f"R.I.F.: {tenant.tax_id.upper()}")
+            y -= 3.4 * mm
 
+        p.setFont("Helvetica", 7)
         if tenant and tenant.address:
-            addr = tenant.address[:40]
-            p.drawCentredString(width / 2, y, addr)
-            y -= 3.5 * mm
+            addr = tenant.address
+            p.drawCentredString(width / 2, y, addr[:42])
+            y -= 3.2 * mm
+            if len(addr) > 42:
+                p.drawCentredString(width / 2, y, addr[42:84])
+                y -= 3.2 * mm
 
         if tenant and tenant.phone:
             p.drawCentredString(width / 2, y, f"TELF: {tenant.phone}")
-            y -= 3.5 * mm
+            y -= 3.4 * mm
 
         # Separador punteado
-        y -= 1 * mm
         p.setFont("Helvetica", 7)
         p.drawCentredString(width / 2, y, "--------------------------------------------------")
         y -= 3.5 * mm
 
-        # ── DATOS DEL DOCUMENTO FISCAL ────────────────────────────────────────
+        # ── DATOS DEL DOCUMENTO Y CLIENTE (SENIAT) ────────────────────────────
+        inv_num = sale.fiscal_invoice_number or f"{sale.id:08d}"
+        ctrl_num = sale.control_number or f"00-{sale.id:08d}"
         p.setFont("Helvetica-Bold", 8)
-        p.drawString(4 * mm, y, "DOCUMENTO NO FISCAL / TICKET")
-        p.drawRightString(width - 4 * mm, y, f"#{str(sale.id).zfill(6)}")
-        y -= 3.5 * mm
+        p.drawString(3.5 * mm, y, f"FACTURA N°: {inv_num}")
+        y -= 3.4 * mm
 
-        if sale.control_number:
-            p.setFont("Helvetica", 7)
-            p.drawString(4 * mm, y, f"N° Control: {sale.control_number}")
-            y -= 3.5 * mm
+        p.setFont("Helvetica", 7)
+        p.drawString(3.5 * mm, y, f"N° CONTROL: {ctrl_num}")
+        y -= 3.4 * mm
 
         date_str = sale.created_at.strftime('%d/%m/%Y %H:%M') if sale.created_at else ""
-        p.setFont("Helvetica", 7)
-        p.drawString(4 * mm, y, f"Fecha: {date_str}")
-        y -= 3.5 * mm
+        p.drawString(3.5 * mm, y, f"FECHA: {date_str}")
+        y -= 3.4 * mm
 
-        # Datos del Cliente
         customer = sale.customer
         if customer:
-            p.drawString(4 * mm, y, f"Cliente: {customer.name[:25]}")
-            y -= 3 * mm
-            p.drawString(4 * mm, y, f"CI/RIF: {customer.tax_id or 'V-999999999'}")
-            y -= 3.5 * mm
+            p.drawString(3.5 * mm, y, f"CLIENTE: {customer.name[:28].upper()}")
+            y -= 3.2 * mm
+            p.drawString(3.5 * mm, y, f"RIF/CI: {customer.tax_id or 'V-00000000-0'}")
+            y -= 3.2 * mm
+            if customer.address:
+                p.drawString(3.5 * mm, y, f"DIR: {customer.address[:34]}")
+                y -= 3.2 * mm
         else:
-            p.drawString(4 * mm, y, "Cliente: CONSUMIDOR FINAL")
-            y -= 3.5 * mm
+            p.drawString(3.5 * mm, y, "CLIENTE: CONSUMIDOR FINAL")
+            y -= 3.4 * mm
 
-        # Separador
         p.drawCentredString(width / 2, y, "--------------------------------------------------")
         y -= 3.5 * mm
 
         # ── TABLA DE PRODUCTOS / SERVICIOS ────────────────────────────────────
         p.setFont("Helvetica-Bold", 7)
-        p.drawString(4 * mm, y, "DESCRIPCION")
-        p.drawRightString(width - 4 * mm, y, "TOTAL")
+        p.drawString(3.5 * mm, y, "CANT x PRECIO / DESCRIPCIÓN")
+        p.drawRightString(width - 3.5 * mm, y, "MONTO")
         y -= 3.5 * mm
 
         p.setFont("Helvetica", 7)
-        rate = float(sale.exchange_rate) if sale.exchange_rate and sale.exchange_rate > 0 else 1.0
+        rate = float(sale.exchange_rate) if sale.exchange_rate and float(sale.exchange_rate) > 0 else 1.0
+        curr_code = "VES" if sale.currency in ["LOCAL", "VES"] else "USD"
+
+        exempt_total = 0.0
+        taxable_base = 0.0
 
         for d in sale.details:
-            name = getattr(d.product, 'name', f"Prod {d.product_id}") if d.product else f"Prod {d.product_id}"
-            qty = float(d.quantity)
-            subt = float(d.subtotal)
-            p.drawString(4 * mm, y, f"{name[:22]}")
-            p.drawRightString(width - 4 * mm, y, f"{subt:,.2f}")
+            prod = d.product
+            name = getattr(prod, 'name', f"Prod {d.product_id}") if prod else f"Prod {d.product_id}"
+            is_exempt = bool(getattr(prod, 'tax_exempt', False)) if prod else False
+            flag = "(E)" if is_exempt else "(G)"
+            qty = float(d.quantity or 0)
+            subt = float(d.subtotal or 0)
+            if is_exempt:
+                exempt_total += subt
+            else:
+                taxable_base += subt
+
+            p.drawString(3.5 * mm, y, f"{name[:24]} {flag}")
+            p.drawRightString(width - 3.5 * mm, y, f"{subt:,.2f}")
             y -= 3 * mm
             p.setFont("Helvetica-Oblique", 6.5)
-            p.drawString(6 * mm, y, f"{qty:.2f} x {float(d.unit_price):,.2f}")
+            p.drawString(5 * mm, y, f"{qty:.2f} x {float(d.unit_price):,.2f} {curr_code}")
             p.setFont("Helvetica", 7)
-            y -= 3.5 * mm
+            y -= 3.4 * mm
 
-        # Separador
         p.drawCentredString(width / 2, y, "--------------------------------------------------")
         y -= 3.5 * mm
 
         # ── TOTALES Y TRIBUTOS VENEZOLANOS (SENIAT) ───────────────────────────
-        subt_f = float(sale.subtotal)
-        tax_f = float(sale.tax_total)
-        igtf_f = float(sale.igtf_amount) if sale.igtf_amount else 0.0
-        tot_f = float(sale.total)
+        subt_f = float(sale.subtotal or 0.0)
+        igtf_f = float(sale.igtf_amount or 0.0)
+        raw_tax = float(sale.tax_total or 0.0)
+        iva_f = max(0.0, raw_tax - igtf_f) if raw_tax >= igtf_f else (taxable_base * 0.16)
+        tot_f = float(sale.total or 0.0)
 
         p.setFont("Helvetica", 7)
-        p.drawString(10 * mm, y, "Subtotal:")
-        p.drawRightString(width - 4 * mm, y, f"{subt_f:,.2f}")
-        y -= 3 * mm
+        if exempt_total > 0:
+            p.drawString(6 * mm, y, "Exento (E):")
+            p.drawRightString(width - 3.5 * mm, y, f"{exempt_total:,.2f}")
+            y -= 3.2 * mm
 
-        p.drawString(10 * mm, y, "IVA (16%):")
-        p.drawRightString(width - 4 * mm, y, f"{tax_f:,.2f}")
-        y -= 3 * mm
+        p.drawString(6 * mm, y, "Base Imponible (G 16%):")
+        p.drawRightString(width - 3.5 * mm, y, f"{subt_f:,.2f}")
+        y -= 3.2 * mm
 
-        if igtf_f > 0:
-            p.drawString(10 * mm, y, "IGTF Divisas (3%):")
-            p.drawRightString(width - 4 * mm, y, f"{igtf_f:,.2f}")
-            y -= 3 * mm
+        p.drawString(6 * mm, y, "I.V.A. (16%):")
+        p.drawRightString(width - 3.5 * mm, y, f"{iva_f:,.2f}")
+        y -= 3.2 * mm
 
-        # Total Destacado
+        if igtf_f > 0.001:
+            p.drawString(6 * mm, y, "I.G.T.F. Divisas (3%):")
+            p.drawRightString(width - 3.5 * mm, y, f"{igtf_f:,.2f}")
+            y -= 3.2 * mm
+
         y -= 1 * mm
-        p.setFont("Helvetica-Bold", 9)
-        p.drawString(4 * mm, y, "TOTAL A PAGAR:")
-        p.drawRightString(width - 4 * mm, y, f"{tot_f:,.2f} {sale.currency or 'USD'}")
-        y -= 4 * mm
+        p.setFont("Helvetica-Bold", 8.5)
+        p.drawString(3.5 * mm, y, "TOTAL A PAGAR:")
+        p.drawRightString(width - 3.5 * mm, y, f"{tot_f:,.2f} {curr_code}")
+        y -= 3.8 * mm
 
-        # Equivalencia Bimonetaria
-        if sale.currency == 'USD' and rate > 1:
+        # Equivalencia Bimonetaria Oficial BCV
+        if curr_code == 'USD' and rate > 1:
             tot_ves = tot_f * rate
-            p.setFont("Helvetica", 7.5)
-            p.drawString(4 * mm, y, f"Equiv. en Bolívares:")
-            p.drawRightString(width - 4 * mm, y, f"Bs. {tot_ves:,.2f}")
-            y -= 3.5 * mm
+            p.setFont("Helvetica-Bold", 7.5)
+            p.drawString(3.5 * mm, y, "EQUIV. EN BOLÍVARES:")
+            p.drawRightString(width - 3.5 * mm, y, f"Bs. {tot_ves:,.2f}")
+            y -= 3.2 * mm
             p.setFont("Helvetica-Oblique", 6.5)
-            p.drawString(4 * mm, y, f"Tasa BCV: {rate:,.2f} Bs/$")
-            y -= 4 * mm
-        elif sale.currency == 'VES' and rate > 1:
+            p.drawString(3.5 * mm, y, f"Tasa Oficial BCV: {rate:,.2f} Bs/$")
+            y -= 3.8 * mm
+        elif curr_code == 'VES' and rate > 1:
             tot_usd = tot_f / rate
-            p.setFont("Helvetica", 7.5)
-            p.drawString(4 * mm, y, f"Ref. en Dólares:")
-            p.drawRightString(width - 4 * mm, y, f"${tot_usd:,.2f} USD")
-            y -= 3.5 * mm
+            p.setFont("Helvetica-Bold", 7.5)
+            p.drawString(3.5 * mm, y, "REF. EN DÓLARES:")
+            p.drawRightString(width - 3.5 * mm, y, f"${tot_usd:,.2f} USD")
+            y -= 3.2 * mm
             p.setFont("Helvetica-Oblique", 6.5)
-            p.drawString(4 * mm, y, f"Tasa BCV: {rate:,.2f} Bs/$")
-            y -= 4 * mm
+            p.drawString(3.5 * mm, y, f"Tasa Oficial BCV: {rate:,.2f} Bs/$")
+            y -= 3.8 * mm
 
         # ── PIE DE TICKET ─────────────────────────────────────────────────────
         p.drawCentredString(width / 2, y, "--------------------------------------------------")
         y -= 3.5 * mm
         p.setFont("Helvetica-Oblique", 6.5)
-        p.drawCentredString(width / 2, y, "CONSERVE ESTE TICKET COMO COMPROBANTE")
+        p.drawCentredString(width / 2, y, "CONSERVE ESTE COMPROBANTE FISCAL")
         y -= 3 * mm
         p.drawCentredString(width / 2, y, "¡Gracias por su compra!")
 
@@ -360,17 +525,27 @@ class PDFService:
         p.setFont("Helvetica", 8)
         p.drawString(width - 1.9 * inch, height - 1.40 * inch, f"{created_dt.strftime('%m/%Y')}")
 
-        # ── DATOS DEL AGENTE DE RETENCIÓN (EMPRESA) ───────────────────────────
+        # ── DATOS DEL AGENTE DE RETENCIÓN (EMPRESA) + LOGO ────────────────────
+        text_x = 0.5 * inch
+        if tenant and getattr(tenant, "logo_url", None):
+            drawn = PDFService._draw_tenant_logo(
+                p, tenant.logo_url,
+                x=0.5 * inch, y=height - 1.55 * inch,
+                max_w=1.25 * inch, max_h=0.65 * inch
+            )
+            if drawn:
+                text_x = 1.85 * inch
+
         p.setFillColor(brand_color)
         p.setFont("Helvetica-Bold", 9)
-        p.drawString(0.5 * inch, height - 1.0 * inch, tenant.name if tenant else "EMPRESA AGENTE DE RETENCIÓN")
+        p.drawString(text_x, height - 1.0 * inch, tenant.name if tenant else "EMPRESA AGENTE DE RETENCIÓN")
         
         p.setFillColor(colors.black)
         p.setFont("Helvetica", 8)
-        p.drawString(0.5 * inch, height - 1.15 * inch, f"R.I.F.: {tenant.tax_id if tenant and tenant.tax_id else 'J-00000000-0'}")
-        p.drawString(0.5 * inch, height - 1.30 * inch, f"Dirección: {tenant.address if tenant and tenant.address else 'Venezuela'}")
+        p.drawString(text_x, height - 1.15 * inch, f"R.I.F.: {tenant.tax_id if tenant and tenant.tax_id else 'J-00000000-0'}")
+        p.drawString(text_x, height - 1.30 * inch, f"Dirección: {tenant.address if tenant and tenant.address else 'Venezuela'}")
         if tenant and tenant.phone:
-            p.drawString(0.5 * inch, height - 1.45 * inch, f"Teléfono: {tenant.phone}")
+            p.drawString(text_x, height - 1.45 * inch, f"Teléfono: {tenant.phone}")
 
         # ── DATOS DEL SUJETO RETENIDO (PROVEEDOR) ─────────────────────────────
         y_box = height - 2.15 * inch
@@ -493,21 +668,31 @@ class PDFService:
         except Exception:
             brand_color = colors.HexColor("#2563eb")
 
-        # ── CABECERA / MEMBRETE ──────────────────────────────────────────────
+        # ── CABECERA / MEMBRETE + LOGO ───────────────────────────────────────
+        text_x = 0.6 * inch
+        if tenant and getattr(tenant, "logo_url", None):
+            drawn = PDFService._draw_tenant_logo(
+                p, tenant.logo_url,
+                x=0.6 * inch, y=height - 1.35 * inch,
+                max_w=1.3 * inch, max_h=0.7 * inch
+            )
+            if drawn:
+                text_x = 2.0 * inch
+
         y = height - 0.7 * inch
         p.setFont("Helvetica-Bold", 14)
         p.setFillColor(brand_color)
         company_name = tenant.name if tenant else "EMPRESA"
-        p.drawString(0.6 * inch, y, company_name.upper())
+        p.drawString(text_x, y, company_name.upper())
 
         p.setFont("Helvetica", 8)
         p.setFillColor(colors.black)
         y -= 0.16 * inch
         if tenant and tenant.tax_id:
-            p.drawString(0.6 * inch, y, f"RIF: {tenant.tax_id.upper()}")
+            p.drawString(text_x, y, f"RIF: {tenant.tax_id.upper()}")
             y -= 0.14 * inch
         if tenant and tenant.address:
-            p.drawString(0.6 * inch, y, f"Dirección: {tenant.address}")
+            p.drawString(text_x, y, f"Dirección: {tenant.address}")
             y -= 0.14 * inch
 
         # Cuadro de Identificación del Recibo
@@ -674,4 +859,192 @@ class PDFService:
         p.save()
         buffer.seek(0)
         return buffer
+
+    @staticmethod
+    def generate_purchase_order(purchase, tenant) -> io.BytesIO:
+        """
+        Genera el documento PDF formal de Orden de Compra con Logo de la Empresa,
+        datos fiscales en Venezuela (RIF, Domicilio Fiscal, Proveedor, Detalle e IVA).
+        """
+        buffer = io.BytesIO()
+        p = canvas.Canvas(buffer, pagesize=letter)
+        width, height = letter
+
+        try:
+            brand_color = colors.HexColor(tenant.primary_color if tenant and tenant.primary_color else "#1e3a8a")
+        except Exception:
+            brand_color = colors.HexColor("#1e3a8a")
+
+        # ── CABECERA Y LOGO EMPRESA ──────────────────────────────────────────
+        text_x = 0.55 * inch
+        if tenant and getattr(tenant, "logo_url", None):
+            drawn = PDFService._draw_tenant_logo(
+                p, tenant.logo_url,
+                x=0.55 * inch, y=height - 1.45 * inch,
+                max_w=1.45 * inch, max_h=0.85 * inch
+            )
+            if drawn:
+                text_x = 2.15 * inch
+
+        y_hdr = height - 0.68 * inch
+        p.setFillColor(brand_color)
+        p.setFont("Helvetica-Bold", 13)
+        p.drawString(text_x, y_hdr, (tenant.name if tenant and tenant.name else "EMPRESA S.A.").upper()[:45])
+
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica-Bold", 8.5)
+        y_hdr -= 0.16 * inch
+        p.drawString(text_x, y_hdr, f"R.I.F.: {tenant.tax_id if tenant and tenant.tax_id else 'J-00000000-0'}")
+
+        p.setFont("Helvetica", 7.5)
+        y_hdr -= 0.14 * inch
+        p.drawString(text_x, y_hdr, f"Domicilio Fiscal: {(tenant.address if tenant and tenant.address else 'Venezuela')[:65]}")
+        if tenant and tenant.phone:
+            y_hdr -= 0.13 * inch
+            p.drawString(text_x, y_hdr, f"Teléfono: {tenant.phone}  {f'| Email: {tenant.email}' if tenant.email else ''}")
+
+        # ── RECUADRO ORDEN DE COMPRA ─────────────────────────────────────────
+        box_w = 2.55 * inch
+        box_h = 0.90 * inch
+        box_x = width - 0.55 * inch - box_w
+        box_y = height - 1.45 * inch
+        p.setStrokeColor(brand_color)
+        p.setFillColor(colors.HexColor("#f8fafc"))
+        p.roundRect(box_x, box_y, box_w, box_h, 5, fill=1, stroke=1)
+
+        p.setFillColor(brand_color)
+        p.setFont("Helvetica-Bold", 10)
+        p.drawCentredString(box_x + box_w / 2, box_y + box_h - 0.20 * inch, "ORDEN DE COMPRA")
+
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica-Bold", 8.5)
+        p.drawString(box_x + 0.12 * inch, box_y + box_h - 0.40 * inch, "N° Orden:")
+        p.setFillColor(colors.HexColor("#dc2626"))
+        p.drawRightString(box_x + box_w - 0.12 * inch, box_y + box_h - 0.40 * inch, f"OC-{purchase.id:06d}")
+
+        created_dt = purchase.created_at
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica", 7.5)
+        p.drawString(box_x + 0.12 * inch, box_y + box_h - 0.57 * inch, "Fecha Emisión:")
+        p.drawRightString(box_x + box_w - 0.12 * inch, box_y + box_h - 0.57 * inch, created_dt.strftime("%d/%m/%Y %H:%M") if created_dt else "N/A")
+
+        p.drawString(box_x + 0.12 * inch, box_y + box_h - 0.73 * inch, "Estado:")
+        p.setFont("Helvetica-Bold", 7.5)
+        p.drawRightString(box_x + box_w - 0.12 * inch, box_y + box_h - 0.73 * inch, str(purchase.status.value if hasattr(purchase.status, "value") else purchase.status))
+
+        # ── DATOS DEL PROVEEDOR ──────────────────────────────────────────────
+        y_sup = height - 2.25 * inch
+        p.setStrokeColor(colors.HexColor("#cbd5e1"))
+        p.setFillColor(colors.HexColor("#f1f5f9"))
+        p.roundRect(0.55 * inch, y_sup, width - 1.10 * inch, 0.65 * inch, 4, fill=1, stroke=1)
+
+        supplier = getattr(purchase, "supplier", None)
+        p.setFillColor(brand_color)
+        p.setFont("Helvetica-Bold", 8)
+        p.drawString(0.68 * inch, y_sup + 0.47 * inch, "DATOS DEL PROVEEDOR:")
+
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica-Bold", 8)
+        p.drawString(0.68 * inch, y_sup + 0.30 * inch, f"Razón Social: {supplier.name if supplier else 'Proveedor General'}")
+        p.drawString(4.60 * inch, y_sup + 0.30 * inch, f"R.I.F.: {supplier.tax_id if supplier and supplier.tax_id else 'N/A'}")
+
+        p.setFont("Helvetica", 7.5)
+        p.drawString(0.68 * inch, y_sup + 0.13 * inch, f"Dirección: {(supplier.address if supplier and supplier.address else 'Venezuela')[:65]}")
+        p.drawString(4.60 * inch, y_sup + 0.13 * inch, f"Condición Pago: {str(purchase.payment_method or 'Contado').upper()} | Ref: {purchase.reference or 'S/R'}")
+
+        # ── TABLA DE ÍTEMS DE LA ORDEN DE COMPRA ─────────────────────────────
+        y_tbl = y_sup - 0.32 * inch
+        p.setFillColor(brand_color)
+        p.rect(0.55 * inch, y_tbl, width - 1.10 * inch, 0.24 * inch, fill=1, stroke=0)
+
+        p.setFillColor(colors.white)
+        p.setFont("Helvetica-Bold", 8)
+        p.drawString(0.65 * inch, y_tbl + 0.07 * inch, "CÓDIGO / SKU")
+        p.drawString(1.80 * inch, y_tbl + 0.07 * inch, "DESCRIPCIÓN DEL ARTÍCULO / INSUMO")
+        p.drawRightString(5.35 * inch, y_tbl + 0.07 * inch, "CANT.")
+        p.drawRightString(6.50 * inch, y_tbl + 0.07 * inch, "COSTO UNIT.")
+        p.drawRightString(width - 0.65 * inch, y_tbl + 0.07 * inch, "SUBTOTAL")
+
+        y_row = y_tbl - 0.20 * inch
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica", 8)
+        curr_sym = "Bs." if getattr(purchase, "currency", "USD") == "VES" else "$"
+
+        for idx, det in enumerate(getattr(purchase, "details", []) or []):
+            if y_row < 2.2 * inch:
+                p.showPage()
+                y_row = height - 1.0 * inch
+                p.setFont("Helvetica", 8)
+
+            if idx % 2 == 1:
+                p.setFillColor(colors.HexColor("#f8fafc"))
+                p.rect(0.55 * inch, y_row - 0.05 * inch, width - 1.10 * inch, 0.19 * inch, fill=1, stroke=0)
+                p.setFillColor(colors.black)
+
+            prod = getattr(det, "product", None)
+            sku = prod.sku if prod and getattr(prod, "sku", None) else f"ID-{det.product_id}"
+            name = prod.name if prod and getattr(prod, "name", None) else f"Producto #{det.product_id}"
+            qty = float(det.quantity or 0)
+            cost = float(det.cost_price or 0)
+            sub = float(det.subtotal or (qty * cost))
+
+            p.drawString(0.65 * inch, y_row, str(sku)[:16])
+            p.drawString(1.80 * inch, y_row, str(name)[:48])
+            p.drawRightString(5.35 * inch, y_row, f"{qty:,.2f}")
+            p.drawRightString(6.50 * inch, y_row, f"{curr_sym}{cost:,.2f}")
+            p.drawRightString(width - 0.65 * inch, y_row, f"{curr_sym}{sub:,.2f}")
+            y_row -= 0.20 * inch
+
+        # ── TOTALES DE LA ORDEN DE COMPRA ────────────────────────────────────
+        y_tot = min(y_row - 0.15 * inch, 2.55 * inch)
+        p.setStrokeColor(colors.HexColor("#cbd5e1"))
+        p.line(0.55 * inch, y_tot + 0.15 * inch, width - 0.55 * inch, y_tot + 0.15 * inch)
+
+        subtotal_val = float(purchase.subtotal or 0)
+        tax_val = float(purchase.tax_total or 0)
+        total_val = float(purchase.total or 0)
+        rate_val = float(getattr(purchase, "exchange_rate", 1.0) or 1.0)
+
+        p.setFont("Helvetica-Bold", 8.5)
+        p.drawString(4.90 * inch, y_tot, "Base Imponible:")
+        p.setFont("Helvetica", 8.5)
+        p.drawRightString(width - 0.65 * inch, y_tot, f"{curr_sym}{subtotal_val:,.2f}")
+
+        y_tot -= 0.18 * inch
+        p.setFont("Helvetica-Bold", 8.5)
+        p.drawString(4.90 * inch, y_tot, "I.V.A. (16%):")
+        p.setFont("Helvetica", 8.5)
+        p.drawRightString(width - 0.65 * inch, y_tot, f"{curr_sym}{tax_val:,.2f}")
+
+        y_tot -= 0.22 * inch
+        p.setFillColor(brand_color)
+        p.rect(4.80 * inch, y_tot - 0.06 * inch, width - 5.35 * inch, 0.24 * inch, fill=1, stroke=0)
+        p.setFillColor(colors.white)
+        p.setFont("Helvetica-Bold", 9.5)
+        p.drawString(4.90 * inch, y_tot, "TOTAL ORDEN:")
+        p.drawRightString(width - 0.65 * inch, y_tot, f"{curr_sym}{total_val:,.2f}")
+
+        if rate_val > 1 and curr_sym == "$":
+            y_tot -= 0.18 * inch
+            p.setFillColor(colors.HexColor("#334155"))
+            p.setFont("Helvetica-Bold", 7.5)
+            p.drawRightString(width - 0.65 * inch, y_tot, f"Equivalente Bs. (Tasa BCV {rate_val:,.2f}): Bs. {(total_val * rate_val):,.2f}")
+
+        # ── FIRMAS AUTORIZADAS ───────────────────────────────────────────────
+        y_sign = 1.15 * inch
+        p.setStrokeColor(colors.black)
+        p.setLineWidth(0.8)
+        p.line(0.9 * inch, y_sign, 3.2 * inch, y_sign)
+        p.line(width - 3.2 * inch, y_sign, width - 0.9 * inch, y_sign)
+
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica-Bold", 8)
+        p.drawCentredString(2.05 * inch, y_sign - 0.15 * inch, "SOLICITADO / COMPRAS")
+        p.drawCentredString(width - 2.05 * inch, y_sign - 0.15 * inch, "APROBADO / GERENCIA")
+
+        p.showPage()
+        p.save()
+        buffer.seek(0)
+        return buffer
+
 

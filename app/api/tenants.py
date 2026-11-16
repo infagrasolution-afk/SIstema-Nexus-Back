@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
-from app.api.deps import get_current_tenant, get_master_db, get_current_user
+from app.api.deps import get_current_tenant, get_master_db, get_current_user, get_db
 from app.domain.tenant import Tenant
 from app.domain.user import User
 from app.schemas.tenant import TenantProfileUpdate, TenantResponse
+from app.services.demo_seed_service import DemoSeedService
 
 router = APIRouter()
 
@@ -59,3 +60,19 @@ async def update_my_tenant(
     await db.commit()
     await db.refresh(tenant)
     return tenant
+
+
+@router.post("/seed-demo")
+async def seed_demo_data_endpoint(
+    db: AsyncSession = Depends(get_db),
+    master_db: AsyncSession = Depends(get_master_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Carga o restaura datos realistas de demostración venezolana (Productos con 3 Precios,
+    Clientes, Proveedores, Facturas SENIAT, Órdenes de Compra con Retención IVA, Bancos y Nómina LOTTT)
+    para realizar inducciones y presentaciones comerciales del sistema.
+    """
+    return await DemoSeedService.seed_demo_company_data(db=db, master_db=master_db, tenant_id=tenant_id)
+

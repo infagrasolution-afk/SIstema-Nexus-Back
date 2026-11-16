@@ -245,6 +245,14 @@ async def get_products(
         # Stored in Bs, convert to USD for frontend UI
         if product.price is not None:
             product.price = round(Decimal(str(product.price)) / rate, 4)
+        if getattr(product, 'price_2', None) is not None:
+            product.price_2 = round(Decimal(str(product.price_2)) / rate, 4)
+        else:
+            product.price_2 = Decimal('0.0000')
+        if getattr(product, 'price_3', None) is not None:
+            product.price_3 = round(Decimal(str(product.price_3)) / rate, 4)
+        else:
+            product.price_3 = Decimal('0.0000')
         if product.cost is not None:
             product.cost = round(Decimal(str(product.cost)) / rate, 4)
         if product.average_cost is not None:
@@ -268,6 +276,10 @@ async def create_product(
     product_data = product_in.model_dump()
     if product_data.get("price") is not None:
         product_data["price"] = Decimal(str(product_data["price"])) * rate
+    if product_data.get("price_2") is not None:
+        product_data["price_2"] = Decimal(str(product_data["price_2"])) * rate
+    if product_data.get("price_3") is not None:
+        product_data["price_3"] = Decimal(str(product_data["price_3"])) * rate
     if product_data.get("cost") is not None:
         product_data["cost"] = Decimal(str(product_data["cost"])) * rate
     if product_data.get("average_cost") is not None:
@@ -289,6 +301,10 @@ async def create_product(
     # Present USD to the frontend
     if new_product.price is not None:
         new_product.price = round(Decimal(str(new_product.price)) / rate, 4)
+    if getattr(new_product, 'price_2', None) is not None:
+        new_product.price_2 = round(Decimal(str(new_product.price_2)) / rate, 4)
+    if getattr(new_product, 'price_3', None) is not None:
+        new_product.price_3 = round(Decimal(str(new_product.price_3)) / rate, 4)
     if new_product.cost is not None:
         new_product.cost = round(Decimal(str(new_product.cost)) / rate, 4)
     if new_product.average_cost is not None:
@@ -318,6 +334,10 @@ async def update_product(
     product_data = product_in.model_dump()
     if product_data.get("price") is not None:
         product_data["price"] = Decimal(str(product_data["price"])) * rate
+    if product_data.get("price_2") is not None:
+        product_data["price_2"] = Decimal(str(product_data["price_2"])) * rate
+    if product_data.get("price_3") is not None:
+        product_data["price_3"] = Decimal(str(product_data["price_3"])) * rate
     if product_data.get("cost") is not None:
         product_data["cost"] = Decimal(str(product_data["cost"])) * rate
     if product_data.get("average_cost") is not None:
@@ -349,6 +369,10 @@ async def update_product(
     # Present USD to the frontend
     if product.price is not None:
         product.price = round(Decimal(str(product.price)) / rate, 4)
+    if getattr(product, 'price_2', None) is not None:
+        product.price_2 = round(Decimal(str(product.price_2)) / rate, 4)
+    if getattr(product, 'price_3', None) is not None:
+        product.price_3 = round(Decimal(str(product.price_3)) / rate, 4)
     if product.cost is not None:
         product.cost = round(Decimal(str(product.cost)) / rate, 4)
     if product.average_cost is not None:
@@ -399,6 +423,8 @@ async def import_products_bulk(
         existing = res.scalars().first()
         
         price_bs = Decimal(str(p_in.price)) * rate if p_in.price is not None else Decimal('0.0')
+        price_2_bs = Decimal(str(p_in.price_2)) * rate if getattr(p_in, 'price_2', None) is not None else Decimal('0.0')
+        price_3_bs = Decimal(str(p_in.price_3)) * rate if getattr(p_in, 'price_3', None) is not None else Decimal('0.0')
         cost_bs = Decimal(str(p_in.cost)) * rate if p_in.cost is not None else Decimal('0.0')
         avg_cost_bs = Decimal(str(p_in.average_cost)) * rate if p_in.average_cost is not None else Decimal('0.0')
         
@@ -407,6 +433,10 @@ async def import_products_bulk(
             for field, value in p_in.model_dump().items():
                 if field == "price":
                     existing.price = price_bs
+                elif field == "price_2":
+                    existing.price_2 = price_2_bs
+                elif field == "price_3":
+                    existing.price_3 = price_3_bs
                 elif field == "cost":
                     existing.cost = cost_bs
                 elif field == "average_cost":
@@ -417,6 +447,8 @@ async def import_products_bulk(
             # Create new
             product_data = p_in.model_dump()
             product_data["price"] = price_bs
+            product_data["price_2"] = price_2_bs
+            product_data["price_3"] = price_3_bs
             product_data["cost"] = cost_bs
             product_data["average_cost"] = avg_cost_bs
             new_p = Product(**product_data, tenant_id=tenant_id)

@@ -8,13 +8,14 @@ from decimal import Decimal
 from app.api.deps import get_db, get_current_tenant, get_current_user, require_module, require_permissions
 from app.services.sales_service import SalesService
 from app.services.pdf_service import PDFService
+from app.services.digital_invoice_service import DigitalInvoiceService
 from app.schemas.sales import (
     SaleCreate, SaleResponse, BudgetCreate, BudgetResponse,
     CustomerCreate, CustomerResponse, CustomerUpdate,
     DebitNoteCreate, DebitNoteResponse,
     CreditNoteCreate, CreditNoteResponse
 )
-from app.domain.sales import Sale, Budget, Customer, CreditNote, CreditNoteItem
+from app.domain.sales import Sale, SaleDetail, Budget, Customer, CreditNote, CreditNoteItem
 from app.domain.accounting import DebitNote
 from app.domain.tenant import Tenant
 from app.domain.user import User
@@ -228,7 +229,11 @@ async def get_sale_invoice(
     result = await db.execute(
         select(Sale)
         .where(Sale.id == sale_id, Sale.tenant_id == tenant_id)
-        .options(selectinload(Sale.details), selectinload(Sale.customer), selectinload(Sale.tenant))
+        .options(
+            selectinload(Sale.details).selectinload(SaleDetail.product),
+            selectinload(Sale.customer),
+            selectinload(Sale.tenant)
+        )
     )
     sale = result.scalars().first()
     if not sale:
@@ -238,7 +243,7 @@ async def get_sale_invoice(
     return Response(
         content=pdf_buffer.getvalue(),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=invoice_{sale_id}.pdf"}
+        headers={"Content-Disposition": f"inline; filename=factura_{sale_id:08d}.pdf"}
     )
 
 @router.get("/{sale_id}/ticket")
@@ -252,7 +257,11 @@ async def get_sale_ticket(
     result = await db.execute(
         select(Sale)
         .where(Sale.id == sale_id, Sale.tenant_id == tenant_id)
-        .options(selectinload(Sale.details), selectinload(Sale.customer), selectinload(Sale.tenant))
+        .options(
+            selectinload(Sale.details).selectinload(SaleDetail.product),
+            selectinload(Sale.customer),
+            selectinload(Sale.tenant)
+        )
     )
     sale = result.scalars().first()
     if not sale:
@@ -262,7 +271,7 @@ async def get_sale_ticket(
     return Response(
         content=pdf_buffer.getvalue(),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=ticket_{sale_id}.pdf"}
+        headers={"Content-Disposition": f"inline; filename=ticket_{sale_id:08d}.pdf"}
     )
 
 @router.get("/budgets", response_model=list[BudgetResponse])
@@ -687,4 +696,190 @@ async def get_credit_note_detail(
     if not note:
         raise HTTPException(status_code=404, detail="Nota de crédito no encontrada")
     return note
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INTEGRACIÓN API REST CON PROVEEDOR DE FACTURACIÓN DIGITAL (IMPRENTA DIGITAL SENIAT)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/{sale_id}/digital-invoice-json")
+async def get_sale_digital_invoice_json(
+    sale_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    """
+    Devuelve la estructura JSON estándar SENIAT Venezuela para ser consumida o enviada
+    a la API REST de la empresa proveedora de Facturación Digital (Imprenta Digital).
+    """
+    result = await db.execute(
+        select(Sale)
+        .where(Sale.id == sale_id, Sale.tenant_id == tenant_id)
+        .options(
+            selectinload(Sale.details).selectinload(SaleDetail.product),
+            selectinload(Sale.customer),
+            selectinload(Sale.tenant),
+        )
+    )
+    sale = result.scalars().first()
+    if not sale:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    return DigitalInvoiceService.build_seniat_json_payload(sale, sale.tenant)
+
+
+@router.post("/{sale_id}/send-digital-invoice")
+async def send_sale_to_digital_invoice_provider(
+    sale_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    """
+    Consume la API REST configurada de la empresa proveedora de Facturación Digital
+    y envía el JSON fiscal de la factura para su emisión oficial ante el SENIAT.
+    """
+    result = await db.execute(
+        select(Sale)
+        .where(Sale.id == sale_id, Sale.tenant_id == tenant_id)
+        .options(
+            selectinload(Sale.details).selectinload(SaleDetail.product),
+            selectinload(Sale.customer),
+            selectinload(Sale.tenant),
+        )
+    )
+    sale = result.scalars().first()
+    if not sale:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    return await DigitalInvoiceService.transmit_to_provider_api(db, sale, sale.tenant)
+
+
+@router.post("/digital-invoice/test-connection")
+async def test_digital_invoice_provider_connection(
+    config: Optional[dict] = None,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    """
+    Prueba la conexión API REST con la empresa proveedora de Facturación Digital
+    enviando o validando un payload JSON de homologación SENIAT.
+    """
+    tenant_res = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = tenant_res.scalars().first()
+
+    sample_payload = {
+        "version_esquema": "SENIAT-VE-1.0",
+        "modo_prueba": True,
+        "documento": {
+            "tipo_documento": "01",
+            "nombre_tipo_documento": "FACTURA",
+            "numero_factura": "00000001",
+            "numero_control": "00-00000001",
+            "serie": "A",
+            "fecha_emision": datetime.now().strftime("%Y-%m-%d"),
+            "hora_emision": datetime.now().strftime("%H:%M:%S"),
+            "condicion_pago": "CONTADO",
+            "moneda_operacion": "USD",
+            "tasa_cambio_bcv": 36.50,
+        },
+        "emisor": {
+            "razon_social": tenant.name if tenant else "EMPRESA PRUEBA S.A.",
+            "rif": (tenant.tax_id if tenant and tenant.tax_id else "J-00000000-0").upper(),
+            "domicilio_fiscal": tenant.address if tenant and tenant.address else "Venezuela",
+            "telefono": tenant.phone if tenant and tenant.phone else "",
+        },
+        "adquiriente": {
+            "razon_social": "CLIENTE DE HOMOLOGACION SENIAT C.A.",
+            "rif_ci": "J-12345678-9",
+            "domicilio_fiscal": "Caracas, Venezuela",
+        },
+        "items": [
+            {
+                "numero_linea": 1,
+                "codigo_sku": "PROD-TEST-01",
+                "descripcion": "Producto de Prueba Homologación Factura Digital",
+                "unidad_medida": "UND",
+                "cantidad": 1,
+                "indicador_fiscal": "G",
+                "es_exento": False,
+                "alicuota_iva_porcentaje": 16.0,
+                "precio_unitario_usd": 100.00,
+                "subtotal_usd": 100.00,
+                "monto_iva_usd": 16.00,
+                "total_linea_usd": 116.00,
+                "precio_unitario_ves": 3650.00,
+                "subtotal_ves": 3650.00,
+                "monto_iva_ves": 584.00,
+                "total_linea_ves": 4234.00,
+            }
+        ],
+        "totales": {
+            "moneda_base": "USD",
+            "tasa_bcv": 36.50,
+            "divisas_usd": {
+                "monto_exento": 0.00,
+                "base_imponible_general_16": 100.00,
+                "monto_iva_16": 16.00,
+                "monto_igtf_3": 3.48,
+                "total_a_pagar": 119.48,
+            },
+            "bolivares_ves": {
+                "monto_exento": 0.00,
+                "base_imponible_general_16": 3650.00,
+                "monto_iva_16": 584.00,
+                "monto_igtf_3": 126.92,
+                "total_a_pagar": 4360.92,
+            },
+        },
+    }
+
+    api_cfg = config or ((tenant.settings or {}).get("digital_invoice_api") if tenant and isinstance(tenant.settings, dict) else {}) or {}
+    endpoint_url = (api_cfg.get("endpoint_url") or "").strip()
+
+    if not endpoint_url:
+        return {
+            "status": "simulated",
+            "message": "Validación de esquema JSON SENIAT exitosa (Modo Simulación Local). Ingrese la URL del Endpoint de su proveedor para probar envío externo.",
+            "sample_json": sample_payload,
+        }
+
+    import httpx
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "APEX-ERP-Venezuela-FiscalClient/1.0",
+    }
+    api_token = (api_cfg.get("api_token") or "").strip()
+    auth_type = api_cfg.get("auth_type", "bearer")
+    custom_header = (api_cfg.get("api_header_name") or "X-API-Key").strip()
+
+    if api_token:
+        if auth_type == "bearer":
+            headers["Authorization"] = f"Bearer {api_token}"
+        elif auth_type == "api_key":
+            headers[custom_header or "X-API-Key"] = api_token
+        elif auth_type == "basic":
+            headers["Authorization"] = f"Basic {api_token}"
+
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(endpoint_url, json=sample_payload, headers=headers)
+        try:
+            body = resp.json()
+        except Exception:
+            body = {"raw_body": resp.text}
+        return {
+            "status": "success" if resp.status_code in (200, 201, 202) else "warning",
+            "http_status": resp.status_code,
+            "message": f"Respuesta recibida desde {endpoint_url} (HTTP {resp.status_code}).",
+            "provider_response": body,
+            "sample_json": sample_payload,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "message": f"No se pudo conectar con {endpoint_url}: {str(exc)}",
+            "sample_json": sample_payload,
+        }
+
 
