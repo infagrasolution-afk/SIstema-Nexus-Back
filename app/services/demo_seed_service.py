@@ -75,7 +75,10 @@ class DemoSeedService:
         Puebla TODOS los módulos de la base de datos del tenant con información empresarial
         venezolana realista para demostraciones comerciales e inducciones guiadas. Es idempotente.
         """
-        rate = float(await CurrencyService.get_bcv_rate(db))
+        try:
+            rate = float(CurrencyService.get_bcv_rate() or 36.50)
+        except Exception:
+            rate = 36.50
         if rate <= 1.0:
             rate = 36.50
 
