@@ -685,7 +685,7 @@ class DemoSeedService:
                     customer_id=customer_objs[1].id,
                     total_amount=Decimal("603.2000"),
                     remaining_amount=Decimal("403.2000"),
-                    due_date=datetime.now(timezone.utc) + timedelta(days=15),
+                    due_date=datetime.utcnow() + timedelta(days=15),
                     status=DebtStatus.PARTIAL,
                     notes="Abono inicial recibido de $200.00 USD; saldo pendiente a 15 días",
                     tenant_id=tenant_id,
@@ -845,7 +845,7 @@ class DemoSeedService:
                     supplier_id=supplier_objs[0].id,
                     total_amount=Decimal("663.0000"),
                     remaining_amount=Decimal("663.0000"),
-                    due_date=datetime.now(timezone.utc) + timedelta(days=30),
+                    due_date=datetime.utcnow() + timedelta(days=30),
                     status=DebtStatus.OPEN,
                     notes="Factura proveedor neta de retenciones de IVA (75%) e ISLR",
                     tenant_id=tenant_id,
@@ -871,7 +871,7 @@ class DemoSeedService:
             created_counts["accounts"] = 8
 
             je = JournalEntry(
-                date=datetime.now(timezone.utc),
+                date=datetime.utcnow(),
                 reference="ASI-DEMO-0001",
                 description="Asiento contable automático por facturación fiscal SENIAT #00000001 y #00000002",
                 status=JournalEntryStatus.POSTED.value,

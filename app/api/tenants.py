@@ -74,5 +74,12 @@ async def seed_demo_data_endpoint(
     Clientes, Proveedores, Facturas SENIAT, Órdenes de Compra con Retención IVA, Bancos y Nómina LOTTT)
     para realizar inducciones y presentaciones comerciales del sistema.
     """
-    return await DemoSeedService.seed_demo_company_data(db=db, master_db=master_db, tenant_id=tenant_id)
+    try:
+        return await DemoSeedService.seed_demo_company_data(db=db, master_db=master_db, tenant_id=tenant_id)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error al cargar datos demo (tenant {tenant_id}): {type(exc).__name__}: {str(exc)}"
+        )
 
