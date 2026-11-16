@@ -19,6 +19,7 @@ from app.domain.sales import Customer, Sale, SaleDetail, Budget, BudgetItem
 from app.domain.purchases import Supplier, Purchase, PurchaseDetail, PurchaseStatus
 from app.domain.treasury import BankAccount, AccountsReceivable, AccountsPayable
 from app.domain.payroll import Employee, PayrollPeriod, PayrollReceipt
+from app.domain.audit import SystemMovement
 from app.services.currency_service import CurrencyService
 
 # Logo corporativo SVG en Base64 para que todos los PDFs y facturas de la Demo luzcan impecables
@@ -165,8 +166,8 @@ class DemoSeedService:
                 "price_3_usd": 75.00,
                 "unit": "unid",
                 "tax_exempt": False,
-                "stock": 25,
-                "min_stock": 6,
+                "stock": 4,
+                "min_stock": 10,
             },
             {
                 "sku": "ALI-HAR-006",
@@ -204,8 +205,8 @@ class DemoSeedService:
                 "price_3_usd": 690.00,
                 "unit": "unid",
                 "tax_exempt": False,
-                "stock": 12,
-                "min_stock": 3,
+                "stock": 2,
+                "min_stock": 5,
             },
         ]
 
@@ -265,10 +266,22 @@ class DemoSeedService:
                 product_objs.append(new_p)
                 created_counts["products"] += 1
             else:
-                # Asegurar que tenga los 3 precios configurados
+                # Asegurar que tenga los 3 precios y min_stock configurados
                 existing_p.price = p1_ves
                 existing_p.price_2 = p2_ves
                 existing_p.price_3 = p3_ves
+                existing_p.min_stock = Decimal(str(p_data["min_stock"]))
+                st_res = await db.execute(
+                    select(StockSummary).where(
+                        StockSummary.product_id == existing_p.id,
+                        StockSummary.warehouse_id == main_wh_id,
+                    )
+                )
+                st_rec = st_res.scalars().first()
+                if st_rec:
+                    st_rec.min_stock = Decimal(str(p_data["min_stock"]))
+                    if p_data["sku"] in ("TECH-UPS-005", "TECH-LAP-008"):
+                        st_rec.quantity = Decimal(str(p_data["stock"]))
                 product_objs.append(existing_p)
 
         # 4. Clientes Venezolanos Realistas
@@ -693,6 +706,70 @@ class DemoSeedService:
             period.total_deductions_ves = total_ded
             period.total_net_ves = total_net
             created_counts["employees"] = 2
+
+        # 11. Movimientos Globales Demo (para el Monitor en Vivo y Auditoría de Reportes)
+        existing_movs = (
+            await db.execute(select(SystemMovement).where(SystemMovement.tenant_id == tenant_id))
+        ).scalars().all()
+        if not existing_movs:
+            db.add_all([
+                SystemMovement(
+                    tenant_id=tenant_id,
+                    module="SALES",
+                    operation="SALE",
+                    entity_type="Sale",
+                    reference="FAC-00000001",
+                    description="Factura Fiscal SENIAT #00000001 emitida a Automercados Plaza's, C.A. (Tarifa P1 + IGTF 3%)",
+                    amount=Decimal("430.1280"),
+                    currency="USD",
+                    user_name="Administrador Demo",
+                    user_email="admin@apexdemo.com.ve",
+                    ip_address="190.73.114.28",
+                    user_agent="Chrome 131 / Windows 11 Pro (Caja Principal Caracas)",
+                ),
+                SystemMovement(
+                    tenant_id=tenant_id,
+                    module="SALES",
+                    operation="SALE",
+                    entity_type="Sale",
+                    reference="FAC-00000002",
+                    description="Factura Mayorista #00000002 a Crédito 15 días — Inversiones Tecnológicas El Rosal 2026, C.A.",
+                    amount=Decimal("603.2000"),
+                    currency="USD",
+                    user_name="Administrador Demo",
+                    user_email="admin@apexdemo.com.ve",
+                    ip_address="190.73.114.28",
+                    user_agent="Chrome 131 / Windows 11 Pro (Facturación Legal)",
+                ),
+                SystemMovement(
+                    tenant_id=tenant_id,
+                    module="PURCHASES",
+                    operation="PURCHASE",
+                    entity_type="Purchase",
+                    reference="OC-DEMO-0001",
+                    description="Orden de Compra OC-DEMO-0001 recibida con Retención IVA 75% (SNAT/2015/0049)",
+                    amount=Decimal("754.0000"),
+                    currency="USD",
+                    user_name="Compras Demo",
+                    user_email="compras@apexdemo.com.ve",
+                    ip_address="186.185.42.19",
+                    user_agent="Edge 131 / Windows 11 (Almacén Chacao)",
+                ),
+                SystemMovement(
+                    tenant_id=tenant_id,
+                    module="INVENTORY",
+                    operation="CHARGE",
+                    entity_type="Warehouse",
+                    reference="ALM-CHACAO",
+                    description="Configuración de Stock Mínimo y Alarma de Reposición en Almacén Principal Caracas",
+                    quantity=Decimal("8"),
+                    unit="ítems",
+                    user_name="Administrador Demo",
+                    user_email="admin@apexdemo.com.ve",
+                    ip_address="190.73.114.28",
+                    user_agent="Chrome 131 / Windows 11 Pro",
+                ),
+            ])
 
         await db.commit()
         return {
