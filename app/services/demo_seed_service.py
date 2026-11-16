@@ -1,12 +1,17 @@
 """
 Servicio de Población de Datos de Demostración e Inducción (Empresa Demo Venezuela).
-Carga un ecosistema completo y realista adaptado a Venezuela (SENIAT / LOTTT / BCV):
+Carga un ecosistema 100% completo y realista adaptado a Venezuela (SENIAT / LOTTT / BCV / VEN-NIF)
+en TODOS los módulos del sistema ERP:
 - Identidad corporativa y Logo SVG institucional en Base64
-- Almacenes, 10 Productos con 3 Precios (P1, P2, P3), Stock y Exentos/Gravados
+- Almacenes, Ubicaciones (Bins QR), 8 Productos con 3 Precios (P1, P2, P3), Stock Mínimo y Alarmas Activas
+- Movimientos Kardex: Saldo Inicial, Cargos (Entradas), Descargos (Mermas), Notas de Despacho y Auditoría Física
 - Clientes y Proveedores con RIF venezolano
-- Facturas emitidas, Presupuestos, Órdenes de Compra con Retención de IVA (75%)
-- Cuentas Bancarias (Banesco, Mercantil, Zelle), CxC, CxP
-- Empleados y Nómina LOTTT calculada
+- Facturas emitidas, Presupuestos, Notas de Entrega, Notas de Crédito y Notas de Débito
+- Órdenes de Compra con Retención de IVA (75% SENIAT)
+- Tesorería: Cuentas Bancarias (Banesco, Mercantil, Zelle), CxC, CxP y Cajas Registradoras
+- Contabilidad VEN-NIF: Plan Único de Cuentas y Asientos de Libro Diario
+- Nómina LOTTT: Ficha de Trabajadores, Período y Recibos calculados (SSO, RPE, FAOV, Cestaticket)
+- Movimientos Forenses en Vivo con Usuario, Operación e IP
 """
 from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal
@@ -14,15 +19,38 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.tenant import Tenant
-from app.domain.inventory import Product, Warehouse, StockSummary, StockMovement, MovementType, MovementSubtype
-from app.domain.sales import Customer, Sale, SaleDetail, Budget, BudgetItem
+from app.domain.inventory import (
+    Product,
+    Warehouse,
+    BinLocation,
+    StockSummary,
+    StockMovement,
+    MovementType,
+    MovementSubtype,
+    DispatchNote,
+    DispatchNoteItem,
+    InventoryAudit,
+    InventoryAuditDetail,
+)
+from app.domain.sales import (
+    Customer,
+    Sale,
+    SaleDetail,
+    Budget,
+    BudgetItem,
+    CreditNote,
+    CreditNoteItem,
+    DeliveryNote,
+    DeliveryNoteItem,
+)
 from app.domain.purchases import Supplier, Purchase, PurchaseDetail, PurchaseStatus
-from app.domain.treasury import BankAccount, AccountsReceivable, AccountsPayable
+from app.domain.treasury import BankAccount, AccountsReceivable, AccountsPayable, DebtStatus
+from app.domain.accounting import Account, JournalEntry, JournalEntryDetail, DebitNote, JournalEntryStatus
+from app.domain.cash import CashRegister
 from app.domain.payroll import Employee, PayrollPeriod, PayrollReceipt
 from app.domain.audit import SystemMovement
 from app.services.currency_service import CurrencyService
 
-# Logo corporativo SVG en Base64 para que todos los PDFs y facturas de la Demo luzcan impecables
 DEMO_COMPANY_LOGO_DATA_URI = (
     "data:image/svg+xml;base64,"
     "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNDAiIGhlaWdodD0i"
@@ -44,8 +72,8 @@ class DemoSeedService:
         tenant_id: int
     ) -> dict:
         """
-        Puebla la base de datos del tenant con información empresarial venezolana realista
-        para demostraciones comerciales e inducciones guiadas. Es idempotente.
+        Puebla TODOS los módulos de la base de datos del tenant con información empresarial
+        venezolana realista para demostraciones comerciales e inducciones guiadas. Es idempotente.
         """
         rate = float(await CurrencyService.get_bcv_rate(db))
         if rate <= 1.0:
@@ -65,44 +93,83 @@ class DemoSeedService:
                 tenant.email = "facturacion@apexdemo.com.ve"
             if not tenant.primary_color:
                 tenant.primary_color = "#1e3a8a"
+            if not getattr(tenant, "logo_url", None):
+                tenant.logo_url = DEMO_COMPANY_LOGO_DATA_URI
             await master_db.commit()
 
         created_counts = {
             "warehouses": 0,
+            "bins": 0,
             "products": 0,
             "customers": 0,
             "suppliers": 0,
             "sales": 0,
             "budgets": 0,
+            "delivery_notes": 0,
+            "credit_notes": 0,
+            "debit_notes": 0,
             "purchases": 0,
+            "dispatch_notes": 0,
+            "audits": 0,
+            "accounts": 0,
+            "journal_entries": 0,
             "employees": 0,
             "bank_accounts": 0,
         }
 
-        # 2. Almacenes
+        # 2. Almacenes y Ubicaciones (Bins QR)
         wh_res = await db.execute(select(Warehouse).where(Warehouse.tenant_id == tenant_id))
         warehouses = wh_res.scalars().all()
         if not warehouses:
             w1 = Warehouse(
                 name="Almacén Principal Caracas (Chacao)",
-                location="Zona Industrial Los Cortijos, Galpón 14, Caracas",
+                address="Zona Industrial Los Cortijos, Galpón 14, Caracas",
                 is_active=True,
                 tenant_id=tenant_id,
             )
             w2 = Warehouse(
                 name="Sucursal Centro Occidente (Valencia)",
-                location="Zona Industrial Municipal Norte, Av. Este-Oeste, Valencia",
+                address="Zona Industrial Municipal Norte, Av. Este-Oeste, Valencia",
                 is_active=True,
                 tenant_id=tenant_id,
             )
             db.add_all([w1, w2])
             await db.flush()
             main_wh_id = w1.id
+            sec_wh_id = w2.id
             created_counts["warehouses"] = 2
         else:
             main_wh_id = warehouses[0].id
+            sec_wh_id = warehouses[1].id if len(warehouses) > 1 else warehouses[0].id
 
-        # 3. Productos con 3 Niveles de Precios (Precio 1 Detal, Precio 2 Mayor, Precio 3 VIP)
+        existing_bins = (await db.execute(select(BinLocation).where(BinLocation.tenant_id == tenant_id))).scalars().all()
+        if not existing_bins:
+            db.add_all([
+                BinLocation(
+                    warehouse_id=main_wh_id,
+                    code="PAS1-EST1-N1",
+                    zone="Zona A - Tecnología y POS",
+                    description="Estantería frontal de despacho rápido",
+                    tenant_id=tenant_id,
+                ),
+                BinLocation(
+                    warehouse_id=main_wh_id,
+                    code="PAS2-EST3-N2",
+                    zone="Zona B - Insumos y Papelería",
+                    description="Estantería central para cajas y rollos térmicos",
+                    tenant_id=tenant_id,
+                ),
+                BinLocation(
+                    warehouse_id=sec_wh_id,
+                    code="VAL-A1-01",
+                    zone="Galpón Principal Valencia",
+                    description="Recepción y despacho regional",
+                    tenant_id=tenant_id,
+                ),
+            ])
+            created_counts["bins"] = 3
+
+        # 3. Productos con 3 Niveles de Precios + 2 Productos en Alarma de Stock Mínimo
         demo_products = [
             {
                 "sku": "TECH-POS-001",
@@ -259,6 +326,8 @@ class DemoSeedService:
                     movement_subtype=MovementSubtype.INITIAL_BALANCE,
                     quantity=Decimal(str(p_data["stock"])),
                     reference="Inventario Inicial Demo Venezuela",
+                    document_number="INI-0001",
+                    notes="Carga inicial automatizada de demostración",
                     tenant_id=tenant_id,
                     created_by_name="Sistema Demo",
                 )
@@ -266,7 +335,6 @@ class DemoSeedService:
                 product_objs.append(new_p)
                 created_counts["products"] += 1
             else:
-                # Asegurar que tenga los 3 precios y min_stock configurados
                 existing_p.price = p1_ves
                 existing_p.price_2 = p2_ves
                 existing_p.price_3 = p3_ves
@@ -283,6 +351,101 @@ class DemoSeedService:
                     if p_data["sku"] in ("TECH-UPS-005", "TECH-LAP-008"):
                         st_rec.quantity = Decimal(str(p_data["stock"]))
                 product_objs.append(existing_p)
+
+        # 3.1 Movimientos de Cargo (CHARGE), Descargo (DISCHARGE), Notas de Despacho y Auditoría de Inventario
+        existing_charge = (
+            await db.execute(
+                select(StockMovement).where(
+                    StockMovement.tenant_id == tenant_id,
+                    StockMovement.movement_subtype == MovementSubtype.CHARGE,
+                )
+            )
+        ).scalars().first()
+        if not existing_charge and product_objs:
+            db.add_all([
+                StockMovement(
+                    product_id=product_objs[2].id,
+                    warehouse_id=main_wh_id,
+                    movement_type=MovementType.IN,
+                    movement_subtype=MovementSubtype.CHARGE,
+                    quantity=Decimal("5"),
+                    reference="CARGO-0001",
+                    document_number="CG-00001",
+                    notes="Entrada por sobrante verificado en recepción de mercancía",
+                    tenant_id=tenant_id,
+                    created_by_name="Jefe de Almacén Demo",
+                ),
+                StockMovement(
+                    product_id=product_objs[3].id,
+                    warehouse_id=main_wh_id,
+                    movement_type=MovementType.OUT,
+                    movement_subtype=MovementSubtype.DISCHARGE,
+                    quantity=Decimal("2"),
+                    reference="DESCARGO-0001",
+                    document_number="DG-00001",
+                    notes="Descargo por deterioro de empaque externo en traslado interno",
+                    tenant_id=tenant_id,
+                    created_by_name="Jefe de Almacén Demo",
+                ),
+            ])
+
+        existing_dispatch = (
+            await db.execute(select(DispatchNote).where(DispatchNote.tenant_id == tenant_id))
+        ).scalars().first()
+        if not existing_dispatch and product_objs:
+            dn_wh = DispatchNote(
+                source_warehouse_id=main_wh_id,
+                destination_warehouse_id=sec_wh_id,
+                status="IN_TRANSIT",
+                reference="ND-TRASLADO-0001",
+                tenant_id=tenant_id,
+                created_by_name="Coordinador Logístico Demo",
+            )
+            db.add(dn_wh)
+            await db.flush()
+            db.add(
+                DispatchNoteItem(
+                    dispatch_note_id=dn_wh.id,
+                    product_id=product_objs[0].id,
+                    quantity=Decimal("5"),
+                    tenant_id=tenant_id,
+                )
+            )
+            created_counts["dispatch_notes"] = 1
+
+        existing_audit = (
+            await db.execute(select(InventoryAudit).where(InventoryAudit.tenant_id == tenant_id))
+        ).scalars().first()
+        if not existing_audit and product_objs:
+            aud = InventoryAudit(
+                warehouse_id=main_wh_id,
+                name="Auditoría Física Mensual — Almacén Principal Caracas",
+                status="COMPLETED",
+                notes="Conteo físico verificado al 100% con lectores de código QR/2D",
+                tenant_id=tenant_id,
+                created_by_name="Auditor Interno Demo",
+            )
+            db.add(aud)
+            await db.flush()
+            db.add_all([
+                InventoryAuditDetail(
+                    audit_id=aud.id,
+                    product_id=product_objs[0].id,
+                    expected_quantity=Decimal("45"),
+                    counted_quantity=Decimal("45"),
+                    difference=Decimal("0"),
+                    tenant_id=tenant_id,
+                ),
+                InventoryAuditDetail(
+                    audit_id=aud.id,
+                    product_id=product_objs[4].id,
+                    expected_quantity=Decimal("4"),
+                    counted_quantity=Decimal("4"),
+                    difference=Decimal("0"),
+                    tenant_id=tenant_id,
+                ),
+            ])
+            created_counts["audits"] = 1
 
         # 4. Clientes Venezolanos Realistas
         demo_customers = [
@@ -386,49 +549,71 @@ class DemoSeedService:
             else:
                 supplier_objs.append(existing_s)
 
-        # 6. Cuentas Bancarias (Bolívares y Divisas)
+        # 6. Cuentas Bancarias (Bolívares y Divisas) + Caja Registradora
         existing_banks = (
             await db.execute(select(BankAccount).where(BankAccount.tenant_id == tenant_id))
         ).scalars().all()
         if not existing_banks:
             b1 = BankAccount(
-                name="Banesco Cuenta Corriente Fiscal (VES)",
-                bank_name="Banesco Banco Universal",
+                bank_name="Banesco Banco Universal (Cuenta Corriente Fiscal VES)",
                 account_number="0134-0342-19-3421098412",
+                account_type="corriente",
                 currency="VES",
-                balance=Decimal("185400.0000"),
+                holder_name="APEX CORP VENEZUELA DEMO, C.A.",
+                holder_tax_id="J-41258963-0",
+                initial_balance=Decimal("185400.0000"),
+                current_balance=Decimal("185400.0000"),
                 tenant_id=tenant_id,
             )
             b2 = BankAccount(
-                name="Banco Mercantil Cuenta Recaudadora (VES)",
-                bank_name="Banco Mercantil",
+                bank_name="Banco Mercantil (Cuenta Recaudadora Pago Móvil VES)",
                 account_number="0105-0192-44-1192837465",
+                account_type="corriente",
                 currency="VES",
-                balance=Decimal("94200.0000"),
+                holder_name="APEX CORP VENEZUELA DEMO, C.A.",
+                holder_tax_id="J-41258963-0",
+                initial_balance=Decimal("94200.0000"),
+                current_balance=Decimal("94200.0000"),
                 tenant_id=tenant_id,
             )
             b3 = BankAccount(
-                name="Banesco Custodia Libre Convertibilidad (USD)",
-                bank_name="Banesco / Zelle Corporativo",
+                bank_name="Banesco Custodia / Zelle Corporativo (USD)",
                 account_number="USD-CUSTODIA-001",
+                account_type="divisas",
                 currency="USD",
-                balance=Decimal("6450.0000"),
+                holder_name="APEX CORP VENEZUELA DEMO, C.A.",
+                holder_tax_id="J-41258963-0",
+                initial_balance=Decimal("6450.0000"),
+                current_balance=Decimal("6450.0000"),
                 tenant_id=tenant_id,
             )
             db.add_all([b1, b2, b3])
             created_counts["bank_accounts"] = 3
 
+        existing_cash_reg = (
+            await db.execute(select(CashRegister).where(CashRegister.tenant_id == tenant_id))
+        ).scalars().first()
+        if not existing_cash_reg:
+            db.add(
+                CashRegister(
+                    name="Caja Principal POS #01 — Sede Caracas",
+                    computer_uid=f"POS-DEMO-T{tenant_id}-01",
+                    is_active=1,
+                    tenant_id=tenant_id,
+                )
+            )
+
         # 7. Ventas / Facturas Fiscales SENIAT de Demostración + CxC
         existing_sales = (
             await db.execute(select(Sale).where(Sale.tenant_id == tenant_id))
         ).scalars().all()
+        first_sale_id = existing_sales[0].id if existing_sales else None
         if not existing_sales and product_objs and customer_objs:
-            # Factura #1: Venta en Divisas con IGTF 3%
             s1 = Sale(
                 customer_id=customer_objs[0].id,
                 warehouse_id=main_wh_id,
                 subtotal=Decimal("360.0000"),
-                tax_total=Decimal("68.1120"),  # 57.60 IVA + 10.512 IGTF
+                tax_total=Decimal("68.1120"),
                 igtf_amount=Decimal("12.5280"),
                 discount_total=Decimal("0.0000"),
                 total=Decimal("430.1280"),
@@ -444,6 +629,7 @@ class DemoSeedService:
             )
             db.add(s1)
             await db.flush()
+            first_sale_id = s1.id
             db.add_all([
                 SaleDetail(
                     sale_id=s1.id,
@@ -463,7 +649,6 @@ class DemoSeedService:
                 ),
             ])
 
-            # Factura #2: Venta a Crédito Comercial (Genera CxC) con Precio 2 (Mayor)
             s2 = Sale(
                 customer_id=customer_objs[1].id,
                 warehouse_id=main_wh_id,
@@ -499,18 +684,16 @@ class DemoSeedService:
                     sale_id=s2.id,
                     customer_id=customer_objs[1].id,
                     total_amount=Decimal("603.2000"),
-                    paid_amount=Decimal("200.0000"),
                     remaining_amount=Decimal("403.2000"),
                     due_date=datetime.now(timezone.utc) + timedelta(days=15),
-                    status="PARTIAL",
-                    currency="USD",
-                    exchange_rate=Decimal(str(rate)),
+                    status=DebtStatus.PARTIAL,
+                    notes="Abono inicial recibido de $200.00 USD; saldo pendiente a 15 días",
                     tenant_id=tenant_id,
                 )
             )
             created_counts["sales"] = 2
 
-        # 8. Presupuesto / Cotización Demo
+        # 8. Presupuesto / Cotización, Nota de Entrega, Nota de Crédito y Nota de Débito
         existing_budgets = (
             await db.execute(select(Budget).where(Budget.tenant_id == tenant_id))
         ).scalars().all()
@@ -541,6 +724,84 @@ class DemoSeedService:
             )
             created_counts["budgets"] = 1
 
+        existing_deliv = (
+            await db.execute(select(DeliveryNote).where(DeliveryNote.tenant_id == tenant_id))
+        ).scalars().first()
+        if not existing_deliv and product_objs and customer_objs:
+            dn_sale = DeliveryNote(
+                customer_id=customer_objs[0].id,
+                sale_id=first_sale_id,
+                status="DELIVERED",
+                delivery_address=customer_objs[0].address,
+                tenant_id=tenant_id,
+                created_by_name="Despachos Demo",
+            )
+            db.add(dn_sale)
+            await db.flush()
+            db.add(
+                DeliveryNoteItem(
+                    delivery_note_id=dn_sale.id,
+                    product_id=product_objs[0].id,
+                    quantity=Decimal("2"),
+                    tenant_id=tenant_id,
+                )
+            )
+            created_counts["delivery_notes"] = 1
+
+        existing_cn = (
+            await db.execute(select(CreditNote).where(CreditNote.tenant_id == tenant_id))
+        ).scalars().first()
+        if not existing_cn and product_objs and customer_objs:
+            cn = CreditNote(
+                number="NC-000001",
+                customer_id=customer_objs[0].id,
+                reference_invoice_id=first_sale_id,
+                subtotal=Decimal("52.0000"),
+                tax_amount=Decimal("8.3200"),
+                total=Decimal("60.3200"),
+                fiscal_number="NC-00000001",
+                control_number="00-00000091",
+                reason="Descuento pronto pago / ajuste comercial autorizado sobre factura fiscal",
+                status="ACTIVE",
+                affects_inventory=False,
+                warehouse_id=main_wh_id,
+                tenant_id=tenant_id,
+                created_by_name="Facturación Demo",
+            )
+            db.add(cn)
+            await db.flush()
+            db.add(
+                CreditNoteItem(
+                    credit_note_id=cn.id,
+                    product_id=product_objs[2].id,
+                    quantity=Decimal("1"),
+                    unit_price=Decimal("52.0000"),
+                    subtotal=Decimal("52.0000"),
+                    tenant_id=tenant_id,
+                )
+            )
+            created_counts["credit_notes"] = 1
+
+        existing_dn = (
+            await db.execute(select(DebitNote).where(DebitNote.tenant_id == tenant_id))
+        ).scalars().first()
+        if not existing_dn and customer_objs:
+            db.add(
+                DebitNote(
+                    number="ND-000001",
+                    control_number="00-00000105",
+                    type="Débito",
+                    customer_id=customer_objs[1].id,
+                    reference_invoice_id=first_sale_id,
+                    amount=Decimal("35.0000"),
+                    reason="Recargo por flete expreso asegurado Caracas - El Rosal",
+                    status="UNPAID",
+                    tenant_id=tenant_id,
+                    created_by_name="Facturación Demo",
+                )
+            )
+            created_counts["debit_notes"] = 1
+
         # 9. Orden de Compra con Retención de IVA (75% SENIAT) y CxP
         existing_purchases = (
             await db.execute(select(Purchase).where(Purchase.tenant_id == tenant_id))
@@ -556,7 +817,7 @@ class DemoSeedService:
                 reference="OC-DEMO-0001",
                 invoice_number="FAC-00084921",
                 control_number="00-00849210",
-                iva_withholding=Decimal("78.0000"),  # 75% de 104.00
+                iva_withholding=Decimal("78.0000"),
                 islr_withholding=Decimal("13.0000"),
                 payment_method="credit",
                 exchange_rate=Decimal(str(rate)),
@@ -583,18 +844,53 @@ class DemoSeedService:
                     purchase_id=p_demo.id,
                     supplier_id=supplier_objs[0].id,
                     total_amount=Decimal("663.0000"),
-                    paid_amount=Decimal("0.0000"),
                     remaining_amount=Decimal("663.0000"),
                     due_date=datetime.now(timezone.utc) + timedelta(days=30),
-                    status="PENDING",
-                    currency="USD",
-                    exchange_rate=Decimal(str(rate)),
+                    status=DebtStatus.OPEN,
+                    notes="Factura proveedor neta de retenciones de IVA (75%) e ISLR",
                     tenant_id=tenant_id,
                 )
             )
             created_counts["purchases"] = 1
 
-        # 10. Empleados y Nómina LOTTT Venezuela
+        # 10. Contabilidad VEN-NIF: Plan Único de Cuentas y Asientos del Libro Diario
+        existing_accs = (
+            await db.execute(select(Account).where(Account.tenant_id == tenant_id))
+        ).scalars().all()
+        if not existing_accs:
+            acc1 = Account(code="1.1.01.01", name="Caja y Bancos Nacionales (Banesco / Mercantil)", type="Activo", balance=Decimal("6450.0000"), tenant_id=tenant_id)
+            acc2 = Account(code="1.1.02.01", name="Cuentas por Cobrar Comerciales Clientes", type="Activo", balance=Decimal("403.2000"), tenant_id=tenant_id)
+            acc3 = Account(code="1.1.03.01", name="Inventario de Mercancías para la Venta", type="Activo", balance=Decimal("14850.0000"), tenant_id=tenant_id)
+            acc4 = Account(code="2.1.01.01", name="Cuentas por Pagar Proveedores Nacionales", type="Pasivo", balance=Decimal("663.0000"), tenant_id=tenant_id)
+            acc5 = Account(code="2.1.02.01", name="Débito Fiscal IVA (16% SENIAT)", type="Pasivo", balance=Decimal("151.3120"), tenant_id=tenant_id)
+            acc6 = Account(code="3.1.01.01", name="Capital Social Suscrito y Pagado", type="Capital", balance=Decimal("20000.0000"), tenant_id=tenant_id)
+            acc7 = Account(code="4.1.01.01", name="Ingresos por Ventas de Mercancías y Equipos", type="Ingreso", balance=Decimal("880.0000"), tenant_id=tenant_id)
+            acc8 = Account(code="5.1.01.01", name="Costo de Ventas y Operación Comercial", type="Gasto", balance=Decimal("415.0000"), tenant_id=tenant_id)
+            db.add_all([acc1, acc2, acc3, acc4, acc5, acc6, acc7, acc8])
+            await db.flush()
+            created_counts["accounts"] = 8
+
+            je = JournalEntry(
+                date=datetime.now(timezone.utc),
+                reference="ASI-DEMO-0001",
+                description="Asiento contable automático por facturación fiscal SENIAT #00000001 y #00000002",
+                status=JournalEntryStatus.POSTED.value,
+                currency="USD",
+                exchange_rate=Decimal(str(rate)),
+                tenant_id=tenant_id,
+                created_by_name="Contabilidad Demo",
+            )
+            db.add(je)
+            await db.flush()
+            db.add_all([
+                JournalEntryDetail(journal_entry_id=je.id, account_id=acc1.id, debit=Decimal("430.1280"), credit=Decimal("0.0000"), tenant_id=tenant_id),
+                JournalEntryDetail(journal_entry_id=je.id, account_id=acc2.id, debit=Decimal("603.2000"), credit=Decimal("0.0000"), tenant_id=tenant_id),
+                JournalEntryDetail(journal_entry_id=je.id, account_id=acc7.id, debit=Decimal("0.0000"), credit=Decimal("880.0000"), tenant_id=tenant_id),
+                JournalEntryDetail(journal_entry_id=je.id, account_id=acc5.id, debit=Decimal("0.0000"), credit=Decimal("153.3280"), tenant_id=tenant_id),
+            ])
+            created_counts["journal_entries"] = 1
+
+        # 11. Empleados y Nómina LOTTT Venezuela
         existing_emps = (
             await db.execute(select(Employee).where(Employee.id > 0))
         ).scalars().all()
@@ -707,7 +1003,7 @@ class DemoSeedService:
             period.total_net_ves = total_net
             created_counts["employees"] = 2
 
-        # 11. Movimientos Globales Demo (para el Monitor en Vivo y Auditoría de Reportes)
+        # 12. Movimientos Globales Demo (para el Monitor en Vivo y Auditoría de Reportes)
         existing_movs = (
             await db.execute(select(SystemMovement).where(SystemMovement.tenant_id == tenant_id))
         ).scalars().all()
@@ -774,8 +1070,7 @@ class DemoSeedService:
         await db.commit()
         return {
             "status": "success",
-            "message": "Datos de demostración e inducción venezolana cargados exitosamente.",
+            "message": "Todos los módulos del ERP han sido poblados con datos de demostración venezolanos.",
             "exchange_rate_bcv": rate,
             "created": created_counts,
         }
-
