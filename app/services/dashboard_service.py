@@ -102,11 +102,12 @@ class DashboardService:
             )
         )
 
-        # CxC vencidas
+        # CxC vencidas (due_date es TIMESTAMP WITHOUT TIME ZONE -> comparar con UTC naive)
+        now_naive = datetime.utcnow()
         ar_overdue = await db.scalar(
             select(func.count(AccountsReceivable.id)).where(
                 AccountsReceivable.tenant_id == tenant_id,
-                AccountsReceivable.due_date < now,
+                AccountsReceivable.due_date < now_naive,
                 AccountsReceivable.status.in_([DebtStatus.OPEN, DebtStatus.PARTIAL])
             )
         )
