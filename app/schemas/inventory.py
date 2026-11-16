@@ -97,13 +97,19 @@ class InitialStockImport(BaseModel):
     warehouse_id: int
 
 # --- Warehouses ---
+class WarehouseProductMinStock(BaseModel):
+    product_id: int
+    min_stock: Decimal = Decimal('0.0000')
+    initial_quantity: Optional[Decimal] = None
+
 class WarehouseBase(BaseModel):
     name: str
     address: Optional[str] = None
     is_active: bool = True
 
 class WarehouseCreate(WarehouseBase):
-    pass
+    default_min_stock: Optional[Decimal] = None
+    product_min_stocks: Optional[List[WarehouseProductMinStock]] = None
 
 class WarehouseResponse(WarehouseBase):
     id: int

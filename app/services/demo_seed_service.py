@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.tenant import Tenant
-from app.domain.inventory import Product, Warehouse, Stock, InventoryMovement, MovementType, MovementSubtype
+from app.domain.inventory import Product, Warehouse, StockSummary, StockMovement, MovementType, MovementSubtype
 from app.domain.sales import Customer, Sale, SaleDetail, Budget, BudgetItem
 from app.domain.purchases import Supplier, Purchase, PurchaseDetail, PurchaseStatus
 from app.domain.treasury import BankAccount, AccountsReceivable, AccountsPayable
@@ -242,21 +242,21 @@ class DemoSeedService:
                 db.add(new_p)
                 await db.flush()
 
-                stock_rec = Stock(
+                stock_rec = StockSummary(
                     product_id=new_p.id,
                     warehouse_id=main_wh_id,
                     quantity=Decimal(str(p_data["stock"])),
+                    min_stock=Decimal(str(p_data["min_stock"])),
                     tenant_id=tenant_id,
                 )
                 db.add(stock_rec)
 
-                mov = InventoryMovement(
+                mov = StockMovement(
                     product_id=new_p.id,
                     warehouse_id=main_wh_id,
                     movement_type=MovementType.IN,
-                    movement_subtype=MovementSubtype.INITIAL,
+                    movement_subtype=MovementSubtype.INITIAL_BALANCE,
                     quantity=Decimal(str(p_data["stock"])),
-                    unit_cost=cost_ves,
                     reference="Inventario Inicial Demo Venezuela",
                     tenant_id=tenant_id,
                     created_by_name="Sistema Demo",

@@ -113,14 +113,92 @@ class WMSService:
 
     @staticmethod
     async def get_stock_alerts(db: AsyncSession, tenant_id: int):
+        """
+        Evalúa las alarmas de reposición de inventario:
+        1. Por Almacén específico (cuando el producto tiene configurado `min_stock` en ese almacén o global)
+        2. Global por Producto (cuando la suma o existencia en almacén está en o por debajo de `min_stock`)
+        Retorna una lista detallada indicando que el producto está próximo a agotarse y debe reponerse.
+        """
         from sqlalchemy import func
-        stmt = select(
-            Product.name, Product.sku, Product.min_stock,
-            func.sum(StockSummary.quantity).label("current_stock")
-        ).join(StockSummary).where(
-            Product.tenant_id == tenant_id
-        ).group_by(Product.id).having(
-            func.sum(StockSummary.quantity) < Product.min_stock
-        )
-        result = await db.execute(stmt)
-        return result.all()
+
+        # Obtener todos los productos e información de almacenes
+        prod_res = await db.execute(select(Product).where(Product.tenant_id == tenant_id))
+        products = {p.id: p for p in prod_res.scalars().all()}
+
+        wh_res = await db.execute(select(Warehouse).where(Warehouse.tenant_id == tenant_id))
+        warehouses = {w.id: w for w in wh_res.scalars().all()}
+
+        sum_res = await db.execute(select(StockSummary).where(StockSummary.tenant_id == tenant_id))
+        summaries = sum_res.scalars().all()
+
+        alerts = []
+        alerted_product_wh = set()
+
+        # 1. Evaluar stock por cada Almacén donde exista configuración o registro
+        wh_grouped: dict[tuple[int, int], dict] = {}
+        for s in summaries:
+            key = (s.product_id, s.warehouse_id)
+            if key not in wh_grouped:
+                wh_grouped[key] = {"qty": 0.0, "min_stock": 0.0}
+            wh_grouped[key]["qty"] += float(s.quantity or 0.0)
+            if float(getattr(s, "min_stock", 0.0) or 0.0) > wh_grouped[key]["min_stock"]:
+                wh_grouped[key]["min_stock"] = float(s.min_stock or 0.0)
+
+        for (pid, wid), info in wh_grouped.items():
+            prod = products.get(pid)
+            if not prod:
+                continue
+            wh = warehouses.get(wid)
+            wh_name = wh.name if wh else f"Almacén #{wid}"
+            effective_min = info["min_stock"] if info["min_stock"] > 0 else float(prod.min_stock or 0.0)
+            curr_qty = info["qty"]
+
+            if effective_min > 0 and curr_qty <= effective_min:
+                alerted_product_wh.add(pid)
+                deficit = max(0.0, effective_min - curr_qty)
+                status_label = "AGOTADO" if curr_qty <= 0 else "PRÓXIMO A AGOTARSE"
+                alerts.append({
+                    "product_id": pid,
+                    "name": prod.name,
+                    "sku": prod.sku,
+                    "warehouse_id": wid,
+                    "warehouse_name": wh_name,
+                    "current_stock": round(curr_qty, 2),
+                    "min_stock": round(effective_min, 2),
+                    "deficit": round(deficit, 2),
+                    "status": status_label,
+                    "message": (
+                        f"⚠️ ¡Alerta de Inventario en {wh_name}! El producto «{prod.name}» ({prod.sku}) "
+                        f"{'está AGOTADO (0 und)' if curr_qty <= 0 else f'está próximo a agotarse (Quedan {curr_qty:g} de mín. {effective_min:g})'}. "
+                        f"¡Debes reponer mercancía!"
+                    ),
+                })
+
+        # 2. Evaluar productos que tengan min_stock > 0 pero aún no tengan fila en StockSummary (stock = 0)
+        for pid, prod in products.items():
+            if pid in alerted_product_wh:
+                continue
+            p_min = float(prod.min_stock or 0.0)
+            if p_min > 0:
+                total_qty = sum(
+                    v["qty"] for (k_pid, _), v in wh_grouped.items() if k_pid == pid
+                )
+                if total_qty <= p_min:
+                    alerts.append({
+                        "product_id": pid,
+                        "name": prod.name,
+                        "sku": prod.sku,
+                        "warehouse_id": None,
+                        "warehouse_name": "General / Todos los Almacenes",
+                        "current_stock": round(total_qty, 2),
+                        "min_stock": round(p_min, 2),
+                        "deficit": round(max(0.0, p_min - total_qty), 2),
+                        "status": "AGOTADO" if total_qty <= 0 else "PRÓXIMO A AGOTARSE",
+                        "message": (
+                            f"⚠️ ¡Alerta de Inventario! El producto «{prod.name}» ({prod.sku}) "
+                            f"{'está AGOTADO (0 und)' if total_qty <= 0 else f'está próximo a agotarse (Quedan {total_qty:g} de mín. {p_min:g})'}. "
+                            f"¡Debes reponer mercancía!"
+                        ),
+                    })
+
+        return alerts

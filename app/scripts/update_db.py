@@ -220,10 +220,11 @@ CREATE TABLE IF NOT EXISTS payroll_receipts (
     updated_by_name VARCHAR
 );
 
--- 12. System Movements: Campos forenses de IP, Navegador y Endpoint
+-- 12. System Movements & Stock Summary: Campos forenses y stock mínimo por almacén
 ALTER TABLE system_movements ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64);
 ALTER TABLE system_movements ADD COLUMN IF NOT EXISTS user_agent VARCHAR(300);
 ALTER TABLE system_movements ADD COLUMN IF NOT EXISTS endpoint VARCHAR(200);
+ALTER TABLE stock_summary ADD COLUMN IF NOT EXISTS min_stock NUMERIC(18, 4) DEFAULT 0.0000;
 """
 
 async def update_all_databases():

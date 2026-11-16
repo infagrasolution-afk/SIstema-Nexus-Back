@@ -153,6 +153,7 @@ class StockSummary(Base, TimestampMixin, TenantMixin, AuditMixin):
     bin_location_id = Column(Integer, ForeignKey("bin_locations.id"), nullable=True)
     batch_id = Column(Integer, ForeignKey("batches.id"), nullable=True)
     quantity = Column(Numeric(18, 4), default=0.0)
+    min_stock = Column(Numeric(18, 4), default=0.0)  # Stock mínimo configurado por producto en este almacén
     
     product = relationship("Product")
     warehouse = relationship("Warehouse")

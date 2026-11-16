@@ -567,11 +567,143 @@ async def create_warehouse(
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant)
 ):
-    new_warehouse = Warehouse(**warehouse_in.model_dump(), tenant_id=tenant_id)
+    from app.domain.inventory import StockSummary
+
+    new_warehouse = Warehouse(
+        name=warehouse_in.name,
+        address=warehouse_in.address,
+        is_active=warehouse_in.is_active,
+        tenant_id=tenant_id,
+    )
     db.add(new_warehouse)
+    await db.flush()
+
+    # Si al crear el almacén se especificaron límites de stock mínimo por producto o un mínimo por defecto:
+    prod_res = await db.execute(select(Product).where(Product.tenant_id == tenant_id))
+    all_products = prod_res.scalars().all()
+
+    custom_limits_map = {}
+    if warehouse_in.product_min_stocks:
+        for item in warehouse_in.product_min_stocks:
+            custom_limits_map[item.product_id] = item
+
+    default_min = Decimal(str(warehouse_in.default_min_stock)) if warehouse_in.default_min_stock is not None else None
+
+    if custom_limits_map or (default_min is not None and default_min > 0):
+        for prod in all_products:
+            cfg = custom_limits_map.get(prod.id)
+            min_val = Decimal(str(cfg.min_stock)) if cfg else (default_min if default_min is not None else Decimal(str(prod.min_stock or 0)))
+            init_qty = Decimal(str(cfg.initial_quantity)) if (cfg and cfg.initial_quantity is not None) else Decimal('0.0000')
+
+            if min_val > 0 or init_qty > 0:
+                if prod.min_stock is None or Decimal(str(prod.min_stock)) == 0:
+                    prod.min_stock = min_val
+                summary = StockSummary(
+                    product_id=prod.id,
+                    warehouse_id=new_warehouse.id,
+                    quantity=init_qty,
+                    min_stock=min_val,
+                    tenant_id=tenant_id,
+                )
+                db.add(summary)
+
     await db.commit()
     await db.refresh(new_warehouse, attribute_names=['bins'])
     return new_warehouse
+
+
+@router.get("/warehouses/{warehouse_id}/stock-limits")
+async def get_warehouse_stock_limits(
+    warehouse_id: int,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    """
+    Devuelve todos los productos del catálogo junto con su existencia actual y su Stock Mínimo
+    de reposición configurado específicamente en este almacén.
+    """
+    from app.domain.inventory import StockSummary
+
+    prod_res = await db.execute(select(Product).where(Product.tenant_id == tenant_id).order_by(Product.name.asc()))
+    products = prod_res.scalars().all()
+
+    sum_res = await db.execute(
+        select(StockSummary).where(
+            StockSummary.warehouse_id == warehouse_id,
+            StockSummary.tenant_id == tenant_id,
+        )
+    )
+    summaries = sum_res.scalars().all()
+    by_prod: dict[int, dict] = {}
+    for s in summaries:
+        if s.product_id not in by_prod:
+            by_prod[s.product_id] = {"quantity": 0.0, "min_stock": 0.0}
+        by_prod[s.product_id]["quantity"] += float(s.quantity or 0.0)
+        if float(getattr(s, "min_stock", 0.0) or 0.0) > by_prod[s.product_id]["min_stock"]:
+            by_prod[s.product_id]["min_stock"] = float(s.min_stock or 0.0)
+
+    result_list = []
+    for p in products:
+        info = by_prod.get(p.id, {"quantity": 0.0, "min_stock": float(p.min_stock or 0.0)})
+        eff_min = info["min_stock"] if info["min_stock"] > 0 else float(p.min_stock or 0.0)
+        qty = info["quantity"]
+        result_list.append({
+            "product_id": p.id,
+            "sku": p.sku,
+            "name": p.name,
+            "unit_of_measure": p.unit_of_measure or "unid",
+            "current_stock": round(qty, 2),
+            "min_stock": round(eff_min, 2),
+            "needs_restock": eff_min > 0 and qty <= eff_min,
+        })
+    return result_list
+
+
+@router.post("/warehouses/{warehouse_id}/stock-limits")
+async def update_warehouse_stock_limits(
+    warehouse_id: int,
+    items: List[dict],
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    """
+    Actualiza el Stock Mínimo (alarma de reposición) por producto para un almacén específico.
+    """
+    from app.domain.inventory import StockSummary
+
+    for item in items:
+        pid = int(item.get("product_id", 0))
+        if not pid:
+            continue
+        min_val = Decimal(str(item.get("min_stock", 0) or 0))
+
+        stmt = select(StockSummary).where(
+            StockSummary.product_id == pid,
+            StockSummary.warehouse_id == warehouse_id,
+            StockSummary.tenant_id == tenant_id,
+        )
+        res = await db.execute(stmt)
+        summary = res.scalars().first()
+        if summary:
+            summary.min_stock = min_val
+        else:
+            summary = StockSummary(
+                product_id=pid,
+                warehouse_id=warehouse_id,
+                quantity=Decimal('0.0000'),
+                min_stock=min_val,
+                tenant_id=tenant_id,
+            )
+            db.add(summary)
+
+        # También sincronizar el min_stock base del producto si estaba en 0
+        prod_res = await db.execute(select(Product).where(Product.id == pid, Product.tenant_id == tenant_id))
+        prod = prod_res.scalars().first()
+        if prod and (prod.min_stock is None or float(prod.min_stock) == 0):
+            prod.min_stock = min_val
+
+    await db.commit()
+    return {"status": "success", "message": "Límites de stock mínimo y alarmas de reposición actualizados en el almacén."}
 
 # --- Bin Locations ---
 @router.get("/warehouses/{warehouse_id}/bins", response_model=List[BinLocationResponse])
