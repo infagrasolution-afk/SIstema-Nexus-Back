@@ -75,6 +75,9 @@ class DemoSeedService:
         Puebla TODOS los módulos de la base de datos del tenant con información empresarial
         venezolana realista para demostraciones comerciales e inducciones guiadas. Es idempotente.
         """
+        from app.scripts.update_db import ensure_tenant_schema
+        await ensure_tenant_schema(tenant_id)
+
         try:
             rate = float(CurrencyService.get_bcv_rate() or 36.50)
         except Exception:

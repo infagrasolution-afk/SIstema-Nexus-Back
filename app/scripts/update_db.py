@@ -225,7 +225,86 @@ ALTER TABLE system_movements ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64);
 ALTER TABLE system_movements ADD COLUMN IF NOT EXISTS user_agent VARCHAR(300);
 ALTER TABLE system_movements ADD COLUMN IF NOT EXISTS endpoint VARCHAR(200);
 ALTER TABLE stock_summary ADD COLUMN IF NOT EXISTS min_stock NUMERIC(18, 4) DEFAULT 0.0000;
+
+-- 13. Payroll ORM alignment (employees, payroll_periods, payroll_receipts)
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS tenant_id INTEGER;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS tax_id VARCHAR(30);
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS position VARCHAR(100) DEFAULT 'Personal Operativo';
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS base_salary_usd NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS base_salary_ves NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS sso_eligible BOOLEAN DEFAULT TRUE;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS rpe_eligible BOOLEAN DEFAULT TRUE;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS faov_eligible BOOLEAN DEFAULT TRUE;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS cestaticket_eligible BOOLEAN DEFAULT TRUE;
+
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS tenant_id INTEGER;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS payment_date DATE DEFAULT CURRENT_DATE;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS total_gross NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS total_deductions NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS total_net NUMERIC(18, 4) DEFAULT 0.0000;
+
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS tenant_id INTEGER;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS period_id INTEGER;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS base_salary_amount NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS cesta_ticket NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS bonuses NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS overtime NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS gross_total NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS sso_deduction NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS rpe_deduction NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS faov_deduction NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS other_deductions NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS total_deductions NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS net_payable NUMERIC(18, 4) DEFAULT 0.0000;
+ALTER TABLE payroll_receipts ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD';
 """
+
+
+def _split_sql_statements(sql_script: str) -> list[str]:
+    """Divide un script SQL en sentencias individuales respetando bloques DO $$ ... END $$;."""
+    statements: list[str] = []
+    current: list[str] = []
+    in_dollar_block = False
+
+    for raw_line in sql_script.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("--"):
+            continue
+        current.append(raw_line)
+        if "$$" in line:
+            # Alterna estado si aparece un delimitador $$ (y si hay dos en la misma línea vuelve al mismo estado)
+            if line.count("$$") % 2 == 1:
+                in_dollar_block = not in_dollar_block
+        if not in_dollar_block and line.endswith(";"):
+            stmt = "\n".join(current).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+
+    if current:
+        stmt = "\n".join(current).strip()
+        if stmt:
+            statements.append(stmt)
+    return statements
+
+
+async def ensure_tenant_schema(tenant_id: int) -> None:
+    """Garantiza que el esquema, tablas y columnas de un tenant estén 100% actualizados."""
+    schema_name = f"tenant_{tenant_id}"
+    async with master_engine.begin() as conn:
+        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
+
+    engine = get_tenant_engine(tenant_id)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    # Ejecutar cada sentencia individualmente (asyncpg no permite múltiples comandos en un prepared statement)
+    for stmt in _split_sql_statements(TENANT_SCHEMA_MIGRATIONS):
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(stmt))
+        except Exception as mig_err:
+            print(f"Migration notice for Tenant {tenant_id}: {mig_err}")
 
 async def update_all_databases():
     print("Updating Master Database...")
@@ -284,25 +363,10 @@ async def update_all_databases():
             tenants = result.scalars().all()
             
             for tenant in tenants:
-                schema_name = f"tenant_{tenant.id}"
                 print(f"Ensuring schema, tables and columns for Tenant {tenant.id} ({tenant.name})...")
-                
-                # 1. Crear esquema si no existe
-                async with master_engine.begin() as conn:
-                    await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
-                
-                # 2. Crear tablas nuevas con Base.metadata.create_all
-                engine = get_tenant_engine(tenant.id)
-                async with engine.begin() as conn:
-                    await conn.run_sync(Base.metadata.create_all)
-                    
-                    # 3. Aplicar migraciones idempotentes de columnas y tipos NUMERIC(18,4)
-                    try:
-                        await conn.execute(text(TENANT_SCHEMA_MIGRATIONS))
-                    except Exception as mig_err:
-                        print(f"Migration script notice for Tenant {tenant.id}: {mig_err}")
+                await ensure_tenant_schema(tenant.id)
 
-                # 4. Si es la empresa DEMO, asegurar que tenga la información de inducción precargada
+                # Si es la empresa DEMO, asegurar que tenga la información de inducción precargada
                 if "demo" in (tenant.name or "").lower():
                     try:
                         from app.core.database import get_tenant_session_context
