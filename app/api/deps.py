@@ -229,17 +229,19 @@ def require_module(module_name: str):
         if not tenant:
             raise HTTPException(status_code=404, detail="Empresa no encontrada")
 
-        # Tenant 1 (Master) siempre tiene todo activo
-        if tenant.id == 1:
+        # Tenant 1 (Master) y empresas Demo siempre tienen todos los módulos activos
+        if tenant.id == 1 or "demo" in (tenant.name or "").lower():
             return True
 
-        # Validar si la licencia general de la empresa venció
-        now_dt = datetime.now()
-        if tenant.subscription_end and tenant.subscription_end < now_dt:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="La suscripción general del sistema para su empresa ha vencido. Contacte a soporte técnico para renovarla."
-            )
+        # Validar si la licencia general de la empresa venció (comparación segura naive/aware)
+        now_dt = datetime.utcnow()
+        if tenant.subscription_end:
+            sub_end = tenant.subscription_end.replace(tzinfo=None) if getattr(tenant.subscription_end, "tzinfo", None) else tenant.subscription_end
+            if sub_end < now_dt:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="La suscripción general del sistema para su empresa ha vencido. Contacte a soporte técnico para renovarla."
+                )
 
         modules_dict = _normalize_modules(tenant.modules)
         now_str = now_dt.isoformat()

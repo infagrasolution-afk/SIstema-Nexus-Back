@@ -99,8 +99,20 @@ class DemoSeedService:
                 tenant.email = "facturacion@apexdemo.com.ve"
             if not tenant.primary_color:
                 tenant.primary_color = "#1e3a8a"
-            if not getattr(tenant, "logo_url", None):
+            current_logo = getattr(tenant, "logo_url", None) or ""
+            if not current_logo or current_logo.startswith("/uploads"):
                 tenant.logo_url = DEMO_COMPANY_LOGO_DATA_URI
+            tenant.modules = {
+                "sales": {"is_active": True},
+                "inventory": {"is_active": True},
+                "accounting": {"is_active": True},
+                "treasury": {"is_active": True},
+                "purchases": {"is_active": True},
+                "payroll": {"is_active": True},
+                "hr": {"is_active": True},
+                "admin": {"is_active": True},
+                "users": {"is_active": True},
+            }
             await master_db.commit()
 
         created_counts = {
