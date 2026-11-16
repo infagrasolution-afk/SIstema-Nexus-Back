@@ -892,115 +892,112 @@ class DemoSeedService:
 
         # 11. Empleados y Nómina LOTTT Venezuela
         existing_emps = (
-            await db.execute(select(Employee).where(Employee.id > 0))
+            await db.execute(select(Employee).where(Employee.tenant_id == tenant_id))
         ).scalars().all()
         if not existing_emps:
             emp1 = Employee(
                 first_name="Valentina",
                 last_name="Mendoza Bolívar",
                 national_id="V-20491823",
-                rif="V-20491823-1",
+                tax_id="V-20491823-1",
                 email="vmendoza@apexdemo.com.ve",
                 phone="+58 (414) 321-8890",
                 address="Urb. Los Dos Caminos, Caracas",
-                job_title="Gerente de Administración y Finanzas",
+                position="Gerente de Administración y Finanzas",
                 department="Administración",
                 hire_date=date(2023, 2, 1),
-                salary_usd=Decimal("450.0000"),
-                salary_ves=Decimal(str(round(450.0 * rate, 2))),
-                currency="USD",
-                payment_frequency="BIWEEKLY",
-                cestaticket_usd=Decimal("40.0000"),
+                base_salary_usd=Decimal("450.0000"),
+                base_salary_ves=Decimal(str(round(450.0 * rate, 2))),
+                payment_frequency="QUINCENAL",
                 bank_name="Banesco",
                 bank_account="0134-0031-12-0319283741",
-                applies_sso=True,
-                applies_rpe=True,
-                applies_faov=True,
+                sso_eligible=True,
+                rpe_eligible=True,
+                faov_eligible=True,
+                cestaticket_eligible=True,
                 is_active=True,
+                tenant_id=tenant_id,
             )
             emp2 = Employee(
                 first_name="Alejandro",
                 last_name="Castillo Rivas",
                 national_id="V-24819203",
-                rif="V-24819203-7",
+                tax_id="V-24819203-7",
                 email="acastillo@apexdemo.com.ve",
                 phone="+58 (412) 554-1920",
                 address="Urb. La Candelaria, Caracas",
-                job_title="Coordinador de Almacén y Facturación POS",
+                position="Coordinador de Almacén y Facturación POS",
                 department="Operaciones",
                 hire_date=date(2024, 1, 15),
-                salary_usd=Decimal("280.0000"),
-                salary_ves=Decimal(str(round(280.0 * rate, 2))),
-                currency="USD",
-                payment_frequency="BIWEEKLY",
-                cestaticket_usd=Decimal("40.0000"),
+                base_salary_usd=Decimal("280.0000"),
+                base_salary_ves=Decimal(str(round(280.0 * rate, 2))),
+                payment_frequency="QUINCENAL",
                 bank_name="Banco Mercantil",
                 bank_account="0105-0019-98-1019283746",
-                applies_sso=True,
-                applies_rpe=True,
-                applies_faov=True,
+                sso_eligible=True,
+                rpe_eligible=True,
+                faov_eligible=True,
+                cestaticket_eligible=True,
                 is_active=True,
+                tenant_id=tenant_id,
             )
             db.add_all([emp1, emp2])
             await db.flush()
 
             period = PayrollPeriod(
-                code="NOM-2026-Q1",
                 name="Primera Quincena del Mes (LOTTT)",
                 start_date=date.today().replace(day=1),
                 end_date=date.today().replace(day=15),
-                period_type="BIWEEKLY",
+                payment_date=date.today().replace(day=15),
                 exchange_rate=Decimal(str(rate)),
-                status="APPROVED",
+                status="CALCULATED",
+                tenant_id=tenant_id,
+                created_by_name="RRHH Demo",
             )
             db.add(period)
             await db.flush()
 
-            total_sal = Decimal("0")
-            total_cesta = Decimal("0")
+            total_gross = Decimal("0")
             total_ded = Decimal("0")
             total_net = Decimal("0")
 
-            for idx, emp in enumerate([emp1, emp2], start=1):
-                base_ves = Decimal(str(round((float(emp.salary_usd) / 2.0) * rate, 2)))
-                cesta_ves = Decimal(str(round((float(emp.cestaticket_usd) / 2.0) * rate, 2)))
-                sso_ves = Decimal(str(round(float(base_ves) * 0.04, 2)))
-                rpe_ves = Decimal(str(round(float(base_ves) * 0.005, 2)))
-                faov_ves = Decimal(str(round(float(base_ves) * 0.01, 2)))
-                earn_ves = base_ves + cesta_ves
-                ded_ves = sso_ves + rpe_ves + faov_ves
-                net_ves = earn_ves - ded_ves
-                net_usd = Decimal(str(round(float(net_ves) / rate, 2)))
+            for emp in [emp1, emp2]:
+                base_usd = Decimal(str(round(float(emp.base_salary_usd) / 2.0, 2)))
+                cesta_usd = Decimal("20.00")
+                sso_usd = Decimal(str(round(float(base_usd) * 0.04, 2)))
+                rpe_usd = Decimal(str(round(float(base_usd) * 0.005, 2)))
+                faov_usd = Decimal(str(round(float(base_usd) * 0.01, 2)))
+                gross_usd = base_usd + cesta_usd
+                ded_usd = sso_usd + rpe_usd + faov_usd
+                net_usd = gross_usd - ded_usd
 
                 db.add(
                     PayrollReceipt(
-                        payroll_period_id=period.id,
+                        period_id=period.id,
                         employee_id=emp.id,
-                        receipt_number=f"REC-{period.id:03d}-{idx:04d}",
-                        base_salary_ves=base_ves,
-                        cestaticket_ves=cesta_ves,
-                        other_bonuses_ves=Decimal("0"),
-                        total_earnings_ves=earn_ves,
-                        sso_deduction_ves=sso_ves,
-                        rpe_deduction_ves=rpe_ves,
-                        faov_deduction_ves=faov_ves,
-                        other_deductions_ves=Decimal("0"),
-                        total_deductions_ves=ded_ves,
-                        net_amount_ves=net_ves,
-                        net_amount_usd=net_usd,
+                        base_salary_amount=base_usd,
+                        cesta_ticket=cesta_usd,
+                        bonuses=Decimal("0"),
+                        overtime=Decimal("0"),
+                        gross_total=gross_usd,
+                        sso_deduction=sso_usd,
+                        rpe_deduction=rpe_usd,
+                        faov_deduction=faov_usd,
+                        other_deductions=Decimal("0"),
+                        total_deductions=ded_usd,
+                        net_payable=net_usd,
+                        currency="USD",
                         exchange_rate=Decimal(str(rate)),
-                        status="PAID",
+                        tenant_id=tenant_id,
                     )
                 )
-                total_sal += base_ves
-                total_cesta += cesta_ves
-                total_ded += ded_ves
-                total_net += net_ves
+                total_gross += gross_usd
+                total_ded += ded_usd
+                total_net += net_usd
 
-            period.total_salaries_ves = total_sal
-            period.total_cestaticket_ves = total_cesta
-            period.total_deductions_ves = total_ded
-            period.total_net_ves = total_net
+            period.total_gross = total_gross
+            period.total_deductions = total_ded
+            period.total_net = total_net
             created_counts["employees"] = 2
 
         # 12. Movimientos Globales Demo (para el Monitor en Vivo y Auditoría de Reportes)
