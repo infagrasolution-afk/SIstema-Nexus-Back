@@ -5,11 +5,11 @@ from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
 
 from app.core.config import settings
-from app.core.database import MasterSessionLocal, get_tenant_engine
+from app.core.database import MasterSessionLocal, get_tenant_session_context
 from app.domain.user import User
 from app.domain.tenant import Tenant
 from app.domain.rbac import Role, RolePermission, Permission
@@ -42,8 +42,9 @@ class TokenPayload(BaseModel):
 
 
 async def get_master_db() -> AsyncGenerator[AsyncSession, None]:
-    """Proporciona una sesión a la base de datos MASTER (usuarios, empresas, licencias)."""
+    """Proporciona una sesión a la base de datos MASTER (usuarios, empresas, licencias) desde el pool único."""
     async with MasterSessionLocal() as session:
+        await session.execute(text("SET search_path TO public"))
         yield session
 
 
@@ -116,24 +117,18 @@ async def get_db(
     master_db: AsyncSession = Depends(get_master_db)
 ) -> AsyncGenerator[AsyncSession, None]:
     """
-    Proporciona una sesión a la base de datos y esquema del tenant correspondiente.
+    Proporciona una sesión reutilizando el único pool global de conexiones (`master_engine`)
+    y apuntando al esquema del tenant correspondiente (`tenant_{id}, public`).
     """
     if x_tenant_id is not None and current_user.is_superuser:
-        result = await master_db.execute(select(Tenant).where(Tenant.id == x_tenant_id))
-        tenant = result.scalars().first()
-        if not tenant:
+        result = await master_db.execute(select(Tenant.id).where(Tenant.id == x_tenant_id))
+        if not result.scalar():
             raise HTTPException(status_code=404, detail="Empresa no encontrada")
         target_tenant_id = x_tenant_id
-        company_name = tenant.name
     else:
         target_tenant_id = current_user.tenant_id
-        result = await master_db.execute(select(Tenant).where(Tenant.id == target_tenant_id))
-        tenant = result.scalars().first()
-        company_name = tenant.name if tenant else "Unknown"
 
-    engine = get_tenant_engine(target_tenant_id, company_name)
-    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with async_session() as session:
+    async with get_tenant_session_context(target_tenant_id) as session:
         yield session
 
 

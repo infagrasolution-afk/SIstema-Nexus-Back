@@ -281,10 +281,9 @@ async def update_all_databases():
                 # 4. Si es la empresa DEMO, asegurar que tenga la información de inducción precargada
                 if "demo" in (tenant.name or "").lower():
                     try:
-                        from sqlalchemy.ext.asyncio import async_sessionmaker
+                        from app.core.database import get_tenant_session_context
                         from app.services.demo_seed_service import DemoSeedService
-                        TenantSession = async_sessionmaker(bind=engine, expire_on_commit=False)
-                        async with TenantSession() as t_session:
+                        async with get_tenant_session_context(tenant.id) as t_session:
                             await DemoSeedService.seed_demo_company_data(t_session, session, tenant.id)
                             print(f"Demo data seeded/verified for Tenant {tenant.id} ({tenant.name}).")
                     except Exception as seed_err:

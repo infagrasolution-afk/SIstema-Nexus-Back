@@ -6,11 +6,11 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
 
 from app.core.config import settings
-from app.core.database import MasterSessionLocal, get_tenant_engine
+from app.core.database import MasterSessionLocal, get_tenant_session_context
 from app.domain.user import User
 from app.domain.tenant import Tenant
 from app.domain.refresh_token import RefreshToken
@@ -138,20 +138,14 @@ async def get_db(
     x_tenant_id: Optional[int] = Header(None),
     master_db: AsyncSession = Depends(get_master_db)
 ) -> AsyncGenerator[AsyncSession, None]:
-    """Provides a session to the correct tenant database."""
+    """Provides a session to the correct tenant schema using the single global connection pool."""
     if x_tenant_id is not None and current_user.is_superuser:
-        result = await master_db.execute(select(Tenant).where(Tenant.id == x_tenant_id))
-        tenant = result.scalars().first()
-        if not tenant:
+        result = await master_db.execute(select(Tenant.id).where(Tenant.id == x_tenant_id))
+        if not result.scalar():
             raise HTTPException(status_code=404, detail="Company not found")
         target_tenant_id = x_tenant_id
-        company_name = tenant.name
     else:
         target_tenant_id = current_user.tenant_id
-        result = await master_db.execute(select(Tenant).where(Tenant.id == target_tenant_id))
-        tenant = result.scalars().first()
-        company_name = tenant.name if tenant else "Unknown"
-    engine = get_tenant_engine(target_tenant_id, company_name)
-    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with async_session() as session:
+
+    async with get_tenant_session_context(target_tenant_id) as session:
         yield session
