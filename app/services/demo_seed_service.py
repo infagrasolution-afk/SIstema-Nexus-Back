@@ -48,7 +48,7 @@ from app.domain.treasury import BankAccount, AccountsReceivable, AccountsPayable
 from app.domain.accounting import Account, JournalEntry, JournalEntryDetail, DebitNote, JournalEntryStatus
 from app.domain.cash import CashRegister
 from app.domain.payroll import Employee, PayrollPeriod, PayrollReceipt
-from app.domain.audit import SystemMovement
+from app.domain.system_movement import SystemMovement
 from app.services.currency_service import CurrencyService
 
 DEMO_COMPANY_LOGO_DATA_URI = (
@@ -1013,57 +1013,57 @@ class DemoSeedService:
                     tenant_id=tenant_id,
                     module="SALES",
                     operation="SALE",
-                    entity_type="Sale",
-                    reference="FAC-00000001",
+                    reference_type="Sale",
+                    reference_code="FAC-00000001",
                     description="Factura Fiscal SENIAT #00000001 emitida a Automercados Plaza's, C.A. (Tarifa P1 + IGTF 3%)",
                     amount=Decimal("430.1280"),
                     currency="USD",
                     user_name="Administrador Demo",
-                    user_email="admin@apexdemo.com.ve",
                     ip_address="190.73.114.28",
                     user_agent="Chrome 131 / Windows 11 Pro (Caja Principal Caracas)",
+                    endpoint="POST /api/v1/sales/",
                 ),
                 SystemMovement(
                     tenant_id=tenant_id,
                     module="SALES",
                     operation="SALE",
-                    entity_type="Sale",
-                    reference="FAC-00000002",
+                    reference_type="Sale",
+                    reference_code="FAC-00000002",
                     description="Factura Mayorista #00000002 a Crédito 15 días — Inversiones Tecnológicas El Rosal 2026, C.A.",
                     amount=Decimal("603.2000"),
                     currency="USD",
                     user_name="Administrador Demo",
-                    user_email="admin@apexdemo.com.ve",
                     ip_address="190.73.114.28",
                     user_agent="Chrome 131 / Windows 11 Pro (Facturación Legal)",
+                    endpoint="POST /api/v1/sales/",
                 ),
                 SystemMovement(
                     tenant_id=tenant_id,
                     module="PURCHASES",
                     operation="PURCHASE",
-                    entity_type="Purchase",
-                    reference="OC-DEMO-0001",
+                    reference_type="Purchase",
+                    reference_code="OC-DEMO-0001",
                     description="Orden de Compra OC-DEMO-0001 recibida con Retención IVA 75% (SNAT/2015/0049)",
                     amount=Decimal("754.0000"),
                     currency="USD",
                     user_name="Compras Demo",
-                    user_email="compras@apexdemo.com.ve",
                     ip_address="186.185.42.19",
                     user_agent="Edge 131 / Windows 11 (Almacén Chacao)",
+                    endpoint="POST /api/v1/purchases/",
                 ),
                 SystemMovement(
                     tenant_id=tenant_id,
                     module="INVENTORY",
                     operation="CHARGE",
-                    entity_type="Warehouse",
-                    reference="ALM-CHACAO",
+                    reference_type="Warehouse",
+                    reference_code="ALM-CHACAO",
                     description="Configuración de Stock Mínimo y Alarma de Reposición en Almacén Principal Caracas",
                     quantity=Decimal("8"),
                     unit="ítems",
                     user_name="Administrador Demo",
-                    user_email="admin@apexdemo.com.ve",
                     ip_address="190.73.114.28",
                     user_agent="Chrome 131 / Windows 11 Pro",
+                    endpoint="POST /api/v1/inventory/warehouses",
                 ),
             ])
 
