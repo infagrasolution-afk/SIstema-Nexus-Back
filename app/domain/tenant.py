@@ -22,6 +22,9 @@ class Tenant(Base, TimestampMixin, AuditMixin):
     parent_id = Column(Integer, ForeignKey('tenants.id'), nullable=True)
     is_active = Column(Boolean, default=True)
     modules = Column(JSONB, default={"sales": {"is_active": True}, "inventory": {"is_active": True}, "accounting": {"is_active": True}})
+    # Arquitectura Híbrida: Si es NULL usa el Pool Único con esquema tenant_X;
+    # si tiene una URL PostgreSQL dedicada, se conecta a esa base de datos exclusiva del cliente.
+    custom_database_url = Column(String, nullable=True)
     
     # Relationship to branches
     branches = relationship("Tenant", backref=backref("parent", remote_side=[id]))

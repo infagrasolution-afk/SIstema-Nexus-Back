@@ -21,10 +21,13 @@ class SystemMovement(Base, TenantMixin):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # ── Auditoría ──────────────────────────────────────────────
+    # ── Auditoría y Rastreo Forense (Usuario, IP y Dispositivo) ──────────────
     created_at   = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
     user_id      = Column(Integer, nullable=True)   # referencia sin FK (evita cross-schema)
     user_name    = Column(String(150), nullable=True)
+    ip_address   = Column(String(64), nullable=True, index=True)
+    user_agent   = Column(String(300), nullable=True)
+    endpoint     = Column(String(200), nullable=True)
 
     # ── Clasificación ──────────────────────────────────────────
     module       = Column(String(50), nullable=False, index=True)

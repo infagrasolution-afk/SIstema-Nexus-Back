@@ -219,6 +219,11 @@ CREATE TABLE IF NOT EXISTS payroll_receipts (
     updated_by_id INTEGER,
     updated_by_name VARCHAR
 );
+
+-- 12. System Movements: Campos forenses de IP, Navegador y Endpoint
+ALTER TABLE system_movements ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64);
+ALTER TABLE system_movements ADD COLUMN IF NOT EXISTS user_agent VARCHAR(300);
+ALTER TABLE system_movements ADD COLUMN IF NOT EXISTS endpoint VARCHAR(200);
 """
 
 async def update_all_databases():
@@ -230,6 +235,24 @@ async def update_all_databases():
     try:
         async with master_engine.begin() as conn:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_tenant_admin BOOLEAN DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_database_url VARCHAR(500)"))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS security_audit_logs (
+                    id SERIAL PRIMARY KEY,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+                    tenant_id INTEGER,
+                    user_id INTEGER,
+                    username VARCHAR(150),
+                    ip_address VARCHAR(64),
+                    user_agent VARCHAR(350),
+                    module VARCHAR(80) NOT NULL,
+                    action VARCHAR(120) NOT NULL,
+                    http_method VARCHAR(16) NOT NULL,
+                    endpoint_path VARCHAR(255) NOT NULL,
+                    status_code INTEGER,
+                    payload_summary TEXT
+                )
+            """))
             # Backfill: el primer usuario de cada tenant (o 'demo') se marca como is_tenant_admin
             await conn.execute(text("""
                 UPDATE users SET is_tenant_admin = TRUE 

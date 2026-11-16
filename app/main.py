@@ -9,7 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import dispose_all_engines, master_engine
+from app.core.database import dispose_all_engines, master_engine, MasterSessionLocal
+from app.core.audit_context import set_audit_context, get_audit_context, clear_audit_context
+from app.domain.security_audit_log import SecurityAuditLog
 from app.api import (
     inventory, sales, auth, dashboard, suppliers, purchases,
     users, tenants, admin, cash, accounting, treasury, roles,
@@ -85,6 +87,82 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if settings.is_production:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+
+    return response
+
+
+# ── Middleware de Blindaje y Auditoría Forense (IP, Usuario, Dispositivo y Acción) ──
+def _extract_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:64]
+    real_ip = request.headers.get("x-real-ip") or request.headers.get("cf-connecting-ip")
+    if real_ip:
+        return real_ip.strip()[:64]
+    if request.client and request.client.host:
+        return str(request.client.host)[:64]
+    return "127.0.0.1"
+
+
+def _classify_module_and_action(method: str, path: str) -> tuple[str, str]:
+    clean = path.replace("/api/v1/", "").strip("/")
+    parts = clean.split("/")
+    mod = (parts[0] if parts else "system").upper()
+    verb_map = {
+        "POST": "CREACIÓN / EMISIÓN",
+        "PUT": "ACTUALIZACIÓN",
+        "PATCH": "MODIFICACIÓN",
+        "DELETE": "ELIMINACIÓN / ANULACIÓN",
+    }
+    if "login" in clean:
+        return "AUTH", "INICIO DE SESIÓN"
+    if "logout" in clean:
+        return "AUTH", "CIERRE DE SESIÓN"
+    if "seed-demo" in clean:
+        return "TENANTS", "CARGA DATOS DEMO"
+    if "send-digital-invoice" in clean:
+        return "SALES", "TRANSMISIÓN API FACTURA DIGITAL SENIAT"
+    return mod, f"{verb_map.get(method, method)} ({clean[:80]})"
+
+
+@app.middleware("http")
+async def forensic_audit_middleware(request: Request, call_next):
+    clear_audit_context()
+    ip_addr = _extract_client_ip(request)
+    ua = (request.headers.get("user-agent") or "Desconocido")[:300]
+    method = request.method.upper()
+    path = request.url.path
+
+    set_audit_context(ip_address=ip_addr, user_agent=ua, method=method, path=path)
+
+    response = await call_next(request)
+
+    # Registrar en la bitácora forense todas las operaciones de escritura/mutación
+    if method in ("POST", "PUT", "PATCH", "DELETE") and not path.endswith("/auth/refresh"):
+        try:
+            ctx = get_audit_context()
+            mod, act = _classify_module_and_action(method, path)
+            query_str = str(request.url.query or "")
+            summary = f"Endpoint: {method} {path}" + (f"?{query_str}" if query_str else "") + f" | HTTP {response.status_code}"
+            async with MasterSessionLocal() as audit_session:
+                await audit_session.execute(text("SET search_path TO public"))
+                log_entry = SecurityAuditLog(
+                    tenant_id=ctx.get("tenant_id"),
+                    user_id=ctx.get("user_id"),
+                    username=ctx.get("username") or ("login_attempt" if "login" in path else "Sistema"),
+                    ip_address=ip_addr,
+                    user_agent=ua,
+                    module=mod,
+                    action=act,
+                    http_method=method,
+                    endpoint_path=path[:250],
+                    status_code=response.status_code,
+                    payload_summary=summary,
+                )
+                audit_session.add(log_entry)
+                await audit_session.commit()
+        except Exception as audit_err:
+            logger.debug(f"Forensic audit log notice: {audit_err}")
 
     return response
 

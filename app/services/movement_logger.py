@@ -5,9 +5,21 @@ Se llama desde WMSService, SalesService, PurchaseService, TreasuryService, etc.
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.system_movement import SystemMovement
+from app.core.audit_context import get_audit_context
 
 
 class MovementLogger:
+    @staticmethod
+    def _enrich_forensic_fields(user_id=None, user_name=None) -> dict:
+        ctx = get_audit_context()
+        endpoint_str = f"{ctx.get('method', '')} {ctx.get('path', '')}".strip() or None
+        return {
+            "user_id": user_id or ctx.get("user_id"),
+            "user_name": user_name or ctx.get("username"),
+            "ip_address": ctx.get("ip_address"),
+            "user_agent": ctx.get("user_agent"),
+            "endpoint": endpoint_str,
+        }
 
     # ── INVENTARIO ────────────────────────────────────────────────────────────
 
@@ -46,6 +58,7 @@ class MovementLogger:
             f"en almacén «{warehouse_name}»"
             + (f" — Ref: {reference_code}" if reference_code else "")
         )
+        forensic = MovementLogger._enrich_forensic_fields(user_id, user_name)
         entry = SystemMovement(
             tenant_id=tenant_id,
             module="INVENTORY",
@@ -62,12 +75,11 @@ class MovementLogger:
             unit=unit,
             unit_cost=unit_cost,
             currency=currency,
-            user_id=user_id,
-            user_name=user_name,
             description=auto_desc,
             notes=notes,
             status=status,
             created_at=datetime.utcnow(),
+            **forensic,
         )
         db.add(entry)
 
@@ -88,6 +100,7 @@ class MovementLogger:
         status: str = "COMPLETED",
         notes: str = None,
     ):
+        forensic = MovementLogger._enrich_forensic_fields(user_id, user_name)
         entry = SystemMovement(
             tenant_id=tenant_id,
             module="SALES",
@@ -97,8 +110,6 @@ class MovementLogger:
             reference_code=f"VENTA-{sale_id:06d}",
             amount=total,
             currency=currency,
-            user_id=user_id,
-            user_name=user_name,
             description=(
                 f"Venta #{sale_id:06d} a «{customer_name}» por {currency} {total:,.2f}"
                 + (f" — {payment_method}" if payment_method else "")
@@ -106,6 +117,7 @@ class MovementLogger:
             notes=notes,
             status=status,
             created_at=datetime.utcnow(),
+            **forensic,
         )
         db.add(entry)
 
@@ -127,6 +139,7 @@ class MovementLogger:
         status: str = "COMPLETED",
         notes: str = None,
     ):
+        forensic = MovementLogger._enrich_forensic_fields(user_id, user_name)
         entry = SystemMovement(
             tenant_id=tenant_id,
             module="PURCHASES",
@@ -136,8 +149,6 @@ class MovementLogger:
             reference_code=reference or f"COMPRA-{purchase_id:06d}",
             amount=total,
             currency=currency,
-            user_id=user_id,
-            user_name=user_name,
             description=(
                 f"Compra #{purchase_id:06d} a proveedor «{supplier_name}» por {currency} {total:,.2f}"
                 + (f" — {payment_method}" if payment_method else "")
@@ -145,6 +156,7 @@ class MovementLogger:
             notes=notes,
             status=status,
             created_at=datetime.utcnow(),
+            **forensic,
         )
         db.add(entry)
 
@@ -166,6 +178,7 @@ class MovementLogger:
         notes: str = None,
     ):
         label = "Cobro a cliente" if operation == "PAYMENT_AR" else "Pago a proveedor"
+        forensic = MovementLogger._enrich_forensic_fields(user_id, user_name)
         entry = SystemMovement(
             tenant_id=tenant_id,
             module="TREASURY",
@@ -175,8 +188,6 @@ class MovementLogger:
             reference_code=f"PAGO-{payment_id:06d}",
             amount=amount,
             currency=currency,
-            user_id=user_id,
-            user_name=user_name,
             description=(
                 f"{label}: «{counterpart_name}» — {currency} {amount:,.2f}"
                 + (f" vía {payment_method}" if payment_method else "")
@@ -184,6 +195,7 @@ class MovementLogger:
             notes=notes,
             status="COMPLETED",
             created_at=datetime.utcnow(),
+            **forensic,
         )
         db.add(entry)
 
@@ -201,6 +213,7 @@ class MovementLogger:
         user_id: int = None,
         user_name: str = None,
     ):
+        forensic = MovementLogger._enrich_forensic_fields(user_id, user_name)
         entry = SystemMovement(
             tenant_id=tenant_id,
             module="ACCOUNTING",
@@ -209,12 +222,11 @@ class MovementLogger:
             reference_type="JournalEntry",
             reference_code=reference,
             amount=total_debit,
-            user_id=user_id,
-            user_name=user_name,
             description=f"Asiento contable #{entry_id}: {description}"
             + (f" — Ref: {reference}" if reference else ""),
             status="COMPLETED",
             created_at=datetime.utcnow(),
+            **forensic,
         )
         db.add(entry)
 
@@ -233,6 +245,7 @@ class MovementLogger:
         notes: str = None,
     ):
         label = "Apertura de caja" if operation == "CASH_OPEN" else "Cierre de caja"
+        forensic = MovementLogger._enrich_forensic_fields(user_id, user_name)
         entry = SystemMovement(
             tenant_id=tenant_id,
             module="CASH",
@@ -241,11 +254,10 @@ class MovementLogger:
             reference_type="CashSession",
             reference_code=f"CAJA-{session_id:06d}",
             amount=amount,
-            user_id=user_id,
-            user_name=user_name,
             description=f"{label} #{session_id} — Monto: {amount:,.2f}",
             notes=notes,
             status="COMPLETED",
             created_at=datetime.utcnow(),
+            **forensic,
         )
         db.add(entry)

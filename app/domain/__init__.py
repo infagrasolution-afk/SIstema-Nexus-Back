@@ -20,6 +20,7 @@ from app.domain.treasury import AccountsReceivable, AccountsPayable, TreasuryPay
 from app.domain.cash import CashRegister, CashSession, SessionStatus
 from app.domain.rbac import Role, Permission, RolePermission
 from app.domain.system_movement import SystemMovement
+from app.domain.security_audit_log import SecurityAuditLog
 from app.domain.payroll import Employee, PayrollPeriod, PayrollReceipt, PayrollPeriodStatus
 
 __all__ = [
@@ -38,5 +39,6 @@ __all__ = [
     "CashRegister", "CashSession", "SessionStatus",
     "Role", "Permission", "RolePermission",
     "SystemMovement",
+    "SecurityAuditLog",
     "Employee", "PayrollPeriod", "PayrollReceipt", "PayrollPeriodStatus",
 ]

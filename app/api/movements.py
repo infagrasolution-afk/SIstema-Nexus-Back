@@ -8,8 +8,9 @@ from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel
 
-from app.api.deps import get_db, get_current_tenant, get_current_user
+from app.api.deps import get_db, get_master_db, get_current_tenant, get_current_user
 from app.domain.system_movement import SystemMovement
+from app.domain.security_audit_log import SecurityAuditLog
 from app.domain.user import User
 
 router = APIRouter()
@@ -21,6 +22,9 @@ class SystemMovementResponse(BaseModel):
     created_at: datetime
     user_id: Optional[int] = None
     user_name: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    endpoint: Optional[str] = None
     module: str
     operation: str
     reference_id: Optional[int] = None
@@ -135,3 +139,43 @@ async def get_movements_summary(
         }
         for r in rows
     ]
+
+
+@router.get("/security-audit")
+async def get_tenant_security_audit_logs(
+    limit: int = Query(200, le=500),
+    master_db: AsyncSession = Depends(get_master_db),
+    tenant_id: int = Depends(get_current_tenant),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retorna la Bitácora Forense de Seguridad de la empresa actual:
+    Cada creación, edición, eliminación, inicio de sesión y emisión fiscal con Usuario, IP y Navegador.
+    """
+    stmt = (
+        select(SecurityAuditLog)
+        .where(SecurityAuditLog.tenant_id == tenant_id)
+        .order_by(SecurityAuditLog.created_at.desc())
+        .limit(limit)
+    )
+    res = await master_db.execute(stmt)
+    logs = res.scalars().all()
+    return [
+        {
+            "id": l.id,
+            "created_at": l.created_at,
+            "tenant_id": l.tenant_id,
+            "user_id": l.user_id,
+            "username": l.username or "Sistema",
+            "ip_address": l.ip_address or "N/A",
+            "user_agent": l.user_agent or "N/A",
+            "module": l.module,
+            "action": l.action,
+            "http_method": l.http_method,
+            "endpoint_path": l.endpoint_path,
+            "status_code": l.status_code,
+            "payload_summary": l.payload_summary,
+        }
+        for l in logs
+    ]
+

@@ -5,11 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import List
 
-from app.core.database import init_tenant_db
+from app.core.database import init_tenant_db, set_tenant_custom_db_cache
 from app.core.security import get_password_hash
 from app.api.deps import get_current_user, get_master_db
 from app.domain.user import User
 from app.domain.tenant import Tenant
+from app.domain.security_audit_log import SecurityAuditLog
 from app.schemas.tenant import TenantResponse, TenantBase, TenantUpdate
 from app.schemas.user import UserResponse, UserCreate
 from app.services.email_service import EmailService
@@ -37,12 +38,25 @@ async def get_admin_dashboard(
     )).scalar() or 0
     
     total_users = (await db.execute(select(func.count(User.id)))).scalar() or 0
+    total_audit_events = 0
+    try:
+        total_audit_events = (await db.execute(select(func.count(SecurityAuditLog.id)))).scalar() or 0
+    except Exception:
+        pass
+
+    # Conteo de usuarios por tenant para vista ejecutiva del dueño del sistema
+    users_by_tenant_res = await db.execute(
+        select(User.tenant_id, func.count(User.id)).group_by(User.tenant_id)
+    )
+    users_per_tenant = {str(r[0]): r[1] for r in users_by_tenant_res.all()}
     
     return {
         "total_tenants": total_tenants,
         "active_tenants": active_tenants,
         "expiring_soon": expiring_soon,
         "total_users": total_users,
+        "total_audit_events": total_audit_events,
+        "users_per_tenant": users_per_tenant,
     }
 
 @router.get("/tenants", response_model=List[TenantResponse])
@@ -69,14 +83,15 @@ async def create_tenant(
         license_key=license_key,
         subscription_end=sub_end,
         is_active=True,
-        modules=tenant_in.modules or "sales,inventory,accounting"
+        modules=tenant_in.modules or "sales,inventory,accounting",
+        custom_database_url=(tenant_in.custom_database_url or "").strip() or None,
     )
     db.add(new_tenant)
     await db.commit()
     await db.refresh(new_tenant)
     
-    # AUTO-CREATE the tenant's private database file
-    await init_tenant_db(new_tenant.id, new_tenant.name)
+    # AUTO-CREATE the tenant's schema in shared pool OR tables in dedicated DB (Hybrid mode)
+    await init_tenant_db(new_tenant.id, new_tenant.name, new_tenant.custom_database_url)
     
     # AUTO-CREATE the tenant's first admin user if provided
     if tenant_in.admin_username and tenant_in.admin_password:
@@ -122,6 +137,7 @@ async def update_tenant_global(
         
     await db.commit()
     await db.refresh(tenant)
+    set_tenant_custom_db_cache(tenant.id, getattr(tenant, "custom_database_url", None))
     return tenant
 
 @router.post("/tenants/{tenant_id}/renew", response_model=TenantResponse)
@@ -256,4 +272,44 @@ async def superadmin_reset_password_force(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /security-audit-logs — BITÁCORA FORENSE GLOBAL (USUARIO, IP, ACCIÓN)
+# ─────────────────────────────────────────────────────────────────────────────
+@router.get("/security-audit-logs")
+async def get_global_security_audit_logs(
+    limit: int = 200,
+    tenant_id: int = None,
+    db: AsyncSession = Depends(get_master_db),
+    admin: User = Depends(check_admin),
+):
+    """
+    Devuelve la bitácora forense inmutable de seguridad de todo el ecosistema SaaS:
+    Usuario, Empresa, Dirección IP, Dispositivo (User-Agent), Módulo, Acción, Ruta y Payload.
+    """
+    stmt = select(SecurityAuditLog).order_by(SecurityAuditLog.created_at.desc()).limit(limit)
+    if tenant_id is not None:
+        stmt = stmt.where(SecurityAuditLog.tenant_id == tenant_id)
+    res = await db.execute(stmt)
+    logs = res.scalars().all()
+    return [
+        {
+            "id": l.id,
+            "created_at": l.created_at,
+            "tenant_id": l.tenant_id,
+            "user_id": l.user_id,
+            "username": l.username or "Anónimo / Sistema",
+            "ip_address": l.ip_address or "N/A",
+            "user_agent": l.user_agent or "N/A",
+            "module": l.module,
+            "action": l.action,
+            "http_method": l.http_method,
+            "endpoint_path": l.endpoint_path,
+            "status_code": l.status_code,
+            "payload_summary": l.payload_summary,
+        }
+        for l in logs
+    ]
+
 

@@ -17,6 +17,7 @@ class TenantBase(BaseModel):
     primary_color: Optional[str] = "#2563eb"
     secondary_color: Optional[str] = "#64748b"
     settings: Optional[Any] = {}
+    custom_database_url: Optional[str] = None
 
     @field_validator('modules', 'settings', mode='before')
     @classmethod

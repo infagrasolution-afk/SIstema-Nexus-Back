@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
 from app.core.config import settings
-from app.core.database import MasterSessionLocal, get_tenant_session_context
+from app.core.database import (
+    MasterSessionLocal,
+    get_tenant_session_context,
+    tenant_custom_db_cache,
+    set_tenant_custom_db_cache,
+)
+from app.core.audit_context import set_audit_context
 from app.domain.user import User
 from app.domain.tenant import Tenant
 from app.domain.rbac import Role, RolePermission, Permission
@@ -88,6 +94,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    set_audit_context(user_id=user.id, username=user.username, tenant_id=user.tenant_id)
     return user
 
 
@@ -117,18 +124,27 @@ async def get_db(
     master_db: AsyncSession = Depends(get_master_db)
 ) -> AsyncGenerator[AsyncSession, None]:
     """
-    Proporciona una sesión reutilizando el único pool global de conexiones (`master_engine`)
-    y apuntando al esquema del tenant correspondiente (`tenant_{id}, public`).
+    Proporciona una sesión en Modo Híbrido:
+    - Por defecto reutiliza el único pool global (`master_engine`) con el esquema `tenant_{id}, public`.
+    - Si la empresa tiene `custom_database_url` (BD dedicada), conecta a su BD exclusiva.
     """
     if x_tenant_id is not None and current_user.is_superuser:
-        result = await master_db.execute(select(Tenant.id).where(Tenant.id == x_tenant_id))
-        if not result.scalar():
+        result = await master_db.execute(select(Tenant).where(Tenant.id == x_tenant_id))
+        tenant = result.scalars().first()
+        if not tenant:
             raise HTTPException(status_code=404, detail="Empresa no encontrada")
         target_tenant_id = x_tenant_id
+        set_tenant_custom_db_cache(target_tenant_id, getattr(tenant, "custom_database_url", None))
     else:
         target_tenant_id = current_user.tenant_id
+        if target_tenant_id not in tenant_custom_db_cache:
+            t_res = await master_db.execute(select(Tenant).where(Tenant.id == target_tenant_id))
+            t_obj = t_res.scalars().first()
+            set_tenant_custom_db_cache(target_tenant_id, getattr(t_obj, "custom_database_url", None) if t_obj else None)
 
-    async with get_tenant_session_context(target_tenant_id) as session:
+    set_audit_context(tenant_id=target_tenant_id)
+    custom_url = tenant_custom_db_cache.get(target_tenant_id)
+    async with get_tenant_session_context(target_tenant_id, custom_url) as session:
         yield session
 
 
