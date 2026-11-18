@@ -388,11 +388,14 @@ async def update_all_databases():
                 print(f"Ensuring schema, tables and columns for Tenant {tenant.id} ({tenant.name})...")
                 await ensure_tenant_schema(tenant.id)
 
-                # Si es la empresa DEMO, asegurar que tenga la información de inducción precargada
+                # Si es la empresa DEMO, asegurar logo corporativo SVG y datos de inducción precargados
                 if "demo" in (tenant.name or "").lower():
                     try:
                         from app.core.database import get_tenant_session_context
-                        from app.services.demo_seed_service import DemoSeedService
+                        from app.services.demo_seed_service import DemoSeedService, DEMO_COMPANY_LOGO_DATA_URI
+                        if not getattr(tenant, "logo_url", None) or str(tenant.logo_url).startswith("/uploads"):
+                            tenant.logo_url = DEMO_COMPANY_LOGO_DATA_URI
+                            await session.commit()
                         async with get_tenant_session_context(tenant.id) as t_session:
                             await DemoSeedService.seed_demo_company_data(t_session, session, tenant.id)
                             print(f"Demo data seeded/verified for Tenant {tenant.id} ({tenant.name}).")
