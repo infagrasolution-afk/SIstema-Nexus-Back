@@ -360,7 +360,16 @@ async def update_all_databases():
             await session.execute(text("UPDATE tenants SET email = 'infagrasolution@gmail.com' WHERE id = 1"))
             await session.execute(text("UPDATE tenants SET name = 'DEMO - APEX ERP' WHERE name = 'DEMO - NEXUS ERP'"))
             await session.execute(text("UPDATE tenants SET email = 'demo@apexerp.com' WHERE email = 'demo@nexuserp.com'"))
-            await session.execute(text("UPDATE users SET email = 'infagrasolution@gmail.com' WHERE username = 'admin'"))
+            await session.execute(text("""
+                UPDATE users SET username = 'linfante'
+                WHERE username = 'admin' AND is_superuser = TRUE
+                  AND NOT EXISTS (SELECT 1 FROM users WHERE username = 'linfante')
+            """))
+            await session.execute(text("""
+                UPDATE users SET is_superuser = TRUE, is_active = TRUE, tenant_id = 1
+                WHERE username = 'linfante'
+            """))
+            await session.execute(text("UPDATE users SET email = 'infagrasolution@gmail.com' WHERE username IN ('admin', 'linfante')"))
             await session.execute(text("UPDATE users SET email = 'demo@apexerp.com' WHERE email = 'demo@nexuserp.com'"))
             await session.execute(text("UPDATE tenants SET subscription_end = '2027-05-28 23:59:59' WHERE LOWER(name) LIKE '%kprishop%'"))
             await session.commit()

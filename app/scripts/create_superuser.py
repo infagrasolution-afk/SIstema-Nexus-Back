@@ -34,7 +34,7 @@ async def create_superuser():
             print(f"Created Master Tenant: {tenant.name}")
         
         # 2. Create Superuser
-        username = "admin"
+        username = "linfante"
         password = "aa11..**"
         
         result = await db.execute(select(User).where(User.username == username))
