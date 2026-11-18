@@ -22,4 +22,8 @@ class User(Base, TimestampMixin, TenantMixin, AuditMixin):
     locked_at = Column(DateTime(timezone=True), nullable=True)
     active_session_id = Column(String, nullable=True)
 
+    # ── Seguridad: Autenticación de 2 Factores (TOTP Google Authenticator) ───
+    totp_secret = Column(String(64), nullable=True)
+    totp_enabled = Column(Boolean, default=False, nullable=False)
+
     role = relationship("Role", back_populates="users")

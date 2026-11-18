@@ -8,15 +8,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from jose import jwt, JWTError
 
+import os
 from app.api.deps import get_current_user, get_master_db
 from app.core.security import (
-    verify_password, create_access_token, create_refresh_token,
+    verify_password, get_password_hash, create_access_token, create_refresh_token,
     TokenPayload
 )
 from app.core.config import settings
+from app.core.network import extract_client_ip
+from app.core.totp import generate_totp_secret, verify_totp_code, build_otpauth_uri
 from app.domain.user import User
 from app.domain.refresh_token import RefreshToken
-from app.schemas.auth import Token, Login, RefreshTokenRequest
+from app.schemas.auth import Token, Login, RefreshTokenRequest, ChangePasswordRequest, TOTPVerifyRequest
 from app.schemas.user import UserResponse
 
 router = APIRouter()
@@ -65,8 +68,8 @@ async def login_access_token(
     request: Request,
     db: AsyncSession = Depends(get_master_db)
 ):
-    # Validar límite de intentos por dirección IP
-    client_ip = request.client.host if request.client else "unknown"
+    # Validar límite de intentos por dirección IP real (detrás de proxy Render/Cloudflare)
+    client_ip = extract_client_ip(request)
     _check_ip_rate_limit(client_ip)
 
     username_clean = (login_data.username or "").strip()
@@ -164,12 +167,30 @@ async def login_access_token(
             }
         )
 
-    # ── Login exitoso: validar estado y generar sesión activa ──────────────────
+    # ── Login exitoso: validar estado, 2FA y generar sesión activa ────────────
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
             detail="Tu usuario está inactivo en el sistema. Contacta al administrador de la empresa."
         )
+
+    if getattr(user, "totp_enabled", False) and getattr(user, "totp_secret", None):
+        if not login_data.totp_code:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "type": "2fa_required",
+                    "message": "Ingresa el código de 6 dígitos de tu aplicación Google Authenticator.",
+                },
+            )
+        if not verify_totp_code(user.totp_secret, login_data.totp_code):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "type": "invalid_2fa",
+                    "message": "Código 2FA inválido o expirado. Verifica tu aplicación Google Authenticator.",
+                },
+            )
 
     user.login_attempts = 0
     # Generar sesión única activa: cualquier otra sesión previa en otra máquina queda invalidada
@@ -311,3 +332,89 @@ async def logout(
             await db.commit()
 
     return {"detail": "Sesión cerrada correctamente"}
+
+
+@router.post("/change-password")
+async def change_password(
+    payload: ChangePasswordRequest,
+    db: AsyncSession = Depends(get_master_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="La contraseña actual es incorrecta.")
+    if len(payload.new_password or "") < 8:
+        raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 8 caracteres.")
+
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user_db = result.scalars().first()
+    if not user_db:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    user_db.hashed_password = get_password_hash(payload.new_password)
+    await db.commit()
+    return {"detail": "Contraseña actualizada exitosamente."}
+
+
+@router.post("/2fa/setup")
+async def setup_2fa(
+    db: AsyncSession = Depends(get_master_db),
+    current_user: User = Depends(get_current_user),
+):
+    secret = generate_totp_secret()
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user_db = result.scalars().first()
+    if not user_db:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    user_db.totp_secret = secret
+    user_db.totp_enabled = False
+    await db.commit()
+    uri = build_otpauth_uri(user_db.username, secret, issuer="APEX ERP")
+    return {"secret": secret, "otpauth_uri": uri}
+
+
+@router.post("/2fa/enable")
+async def enable_2fa(
+    payload: TOTPVerifyRequest,
+    db: AsyncSession = Depends(get_master_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user_db = result.scalars().first()
+    if not user_db or not user_db.totp_secret:
+        raise HTTPException(status_code=400, detail="Primero genera el código QR de configuración 2FA.")
+    if not verify_totp_code(user_db.totp_secret, payload.code):
+        raise HTTPException(status_code=400, detail="Código de 6 dígitos incorrecto o expirado. Inténtalo de nuevo.")
+    user_db.totp_enabled = True
+    await db.commit()
+    return {"detail": "Autenticación de 2 Factores (2FA) activada exitosamente.", "totp_enabled": True}
+
+
+@router.post("/2fa/disable")
+async def disable_2fa(
+    payload: TOTPVerifyRequest,
+    db: AsyncSession = Depends(get_master_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user_db = result.scalars().first()
+    if not user_db:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    if payload.password and not verify_password(payload.password, user_db.hashed_password):
+        raise HTTPException(status_code=400, detail="Contraseña incorrecta.")
+    if user_db.totp_enabled and user_db.totp_secret and not verify_totp_code(user_db.totp_secret, payload.code):
+        raise HTTPException(status_code=400, detail="Código 2FA inválido.")
+    user_db.totp_enabled = False
+    user_db.totp_secret = None
+    await db.commit()
+    return {"detail": "Autenticación de 2 Factores (2FA) desactivada.", "totp_enabled": False}
+
+
+@router.get("/security-status")
+async def get_security_status(current_user: User = Depends(get_current_user)):
+    raw_secret = (os.getenv("SECRET_KEY") or "").strip()
+    secret_ok = len(raw_secret) >= 32
+    return {
+        "totp_enabled": bool(getattr(current_user, "totp_enabled", False)),
+        "is_superuser": bool(current_user.is_superuser),
+        "secret_key_configured": secret_ok if current_user.is_superuser else True,
+        "proxy_ip_rate_limit": True,
+    }

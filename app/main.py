@@ -11,6 +11,7 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import dispose_all_engines, master_engine, MasterSessionLocal
 from app.core.audit_context import set_audit_context, get_audit_context, clear_audit_context
+from app.core.network import extract_client_ip
 from app.domain.security_audit_log import SecurityAuditLog
 from app.api import (
     inventory, sales, auth, dashboard, suppliers, purchases,
@@ -91,19 +92,6 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-# ── Middleware de Blindaje y Auditoría Forense (IP, Usuario, Dispositivo y Acción) ──
-def _extract_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:64]
-    real_ip = request.headers.get("x-real-ip") or request.headers.get("cf-connecting-ip")
-    if real_ip:
-        return real_ip.strip()[:64]
-    if request.client and request.client.host:
-        return str(request.client.host)[:64]
-    return "127.0.0.1"
-
-
 def _classify_module_and_action(method: str, path: str) -> tuple[str, str]:
     clean = path.replace("/api/v1/", "").strip("/")
     parts = clean.split("/")
@@ -128,7 +116,7 @@ def _classify_module_and_action(method: str, path: str) -> tuple[str, str]:
 @app.middleware("http")
 async def forensic_audit_middleware(request: Request, call_next):
     clear_audit_context()
-    ip_addr = _extract_client_ip(request)
+    ip_addr = extract_client_ip(request)
     ua = (request.headers.get("user-agent") or "Desconocido")[:300]
     method = request.method.upper()
     path = request.url.path

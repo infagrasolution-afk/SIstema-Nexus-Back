@@ -328,6 +328,8 @@ async def update_all_databases():
     try:
         async with master_engine.begin() as conn:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_tenant_admin BOOLEAN DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64)"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT FALSE"))
             await conn.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_database_url VARCHAR(500)"))
             await conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS security_audit_logs (

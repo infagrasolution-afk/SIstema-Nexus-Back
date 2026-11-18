@@ -37,10 +37,11 @@ class UserResponse(UserBase):
     role_id: Optional[int] = None
     created_at: datetime
 
-    # Estado de bloqueo de cuenta
+    # Estado de bloqueo de cuenta y 2FA
     is_locked: Optional[bool] = False
     login_attempts: Optional[int] = 0
     locked_at: Optional[datetime] = None
+    totp_enabled: Optional[bool] = False
 
     # Datos del rol y permisos (cargados en el endpoint)
     role: Optional[RoleResponse] = None
