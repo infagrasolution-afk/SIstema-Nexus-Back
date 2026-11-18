@@ -23,23 +23,25 @@ router = APIRouter(dependencies=[Depends(require_module("cash"))])
 async def get_current_session(
     computer_uid: str,
     db: AsyncSession = Depends(deps.get_db),
+    tenant_id: int = Depends(deps.get_current_tenant),
     current_user: User = Depends(deps.get_current_user)
 ):
     """Obtiene la sesión de caja actualmente abierta para este equipo."""
-    return await CashService.get_current_session(db, computer_uid, current_user.tenant_id)
+    return await CashService.get_current_session(db, computer_uid, tenant_id)
 
 
 @router.post("/session/open", response_model=CashSession)
 async def open_session(
     session_in: CashSessionCreate,
     db: AsyncSession = Depends(deps.get_db),
+    tenant_id: int = Depends(deps.get_current_tenant),
     current_user: User = Depends(deps.get_current_user)
 ):
     """
     Abre una sesión de caja para el equipo especificado.
     Si ya hay una sesión abierta por otro usuario, rechaza la apertura.
     """
-    return await CashService.open_session(db, session_in, current_user.id, current_user.tenant_id)
+    return await CashService.open_session(db, session_in, current_user.id, tenant_id)
 
 
 @router.post("/session/{session_id}/close", response_model=CashSession)
@@ -47,13 +49,14 @@ async def close_session(
     session_id: int,
     close_in: CashSessionClose,
     db: AsyncSession = Depends(deps.get_db),
+    tenant_id: int = Depends(deps.get_current_tenant),
     current_user: User = Depends(deps.get_current_user)
 ):
     """
     Cierra una sesión de caja. Calcula el efectivo esperado vs. reportado.
     La diferencia (sobrante/faltante) queda registrada.
     """
-    return await CashService.close_session(db, session_id, close_in, current_user.tenant_id)
+    return await CashService.close_session(db, session_id, close_in, tenant_id)
 
 
 @router.get("/session/{session_id}/report")

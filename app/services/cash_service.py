@@ -1,6 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from datetime import datetime
+from decimal import Decimal
 from app.domain.cash import CashRegister, CashSession, SessionStatus
 from app.domain.sales import Sale
 from app.schemas.cash import CashSessionCreate, CashSessionClose
@@ -43,17 +45,20 @@ class CashService:
         register = await CashService.get_or_assign_register(db, session_in.computer_uid, tenant_id)
         
         # Check if register has an open session
-        stmt = select(CashSession).where(
-            CashSession.register_id == register.id,
-            CashSession.status == SessionStatus.OPEN,
-            CashSession.tenant_id == tenant_id
+        stmt = (
+            select(CashSession)
+            .where(
+                CashSession.register_id == register.id,
+                CashSession.status == SessionStatus.OPEN.value,
+                CashSession.tenant_id == tenant_id
+            )
+            .options(selectinload(CashSession.register))
         )
         result = await db.execute(stmt)
         existing_session = result.scalar_one_or_none()
         
         if existing_session:
             if existing_session.user_id != user_id:
-                # Get user name for better error message
                 from app.domain.user import User
                 u_stmt = select(User).where(User.id == existing_session.user_id)
                 u_res = await db.execute(u_stmt)
@@ -63,21 +68,27 @@ class CashService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"{register.name} ocupada por {user_name}. Se requiere arqueo y cierre para continuar."
                 )
-            existing_session.register = register # Eagerly assign to prevent lazyload crash
-            return existing_session # Already open for this user
+            return existing_session
             
+        start_amount = Decimal(str(session_in.starting_cash or 0))
         new_session = CashSession(
             register_id=register.id,
             user_id=user_id,
-            starting_cash=session_in.starting_cash,
-            status=SessionStatus.OPEN,
+            starting_cash=start_amount,
+            expected_cash=start_amount,
+            status=SessionStatus.OPEN.value,
             tenant_id=tenant_id
         )
         db.add(new_session)
         await db.commit()
-        await db.refresh(new_session)
-        new_session.register = register # Eagerly assign to prevent lazyload crash
-        return new_session
+
+        loaded_stmt = (
+            select(CashSession)
+            .where(CashSession.id == new_session.id)
+            .options(selectinload(CashSession.register))
+        )
+        loaded_res = await db.execute(loaded_stmt)
+        return loaded_res.scalar_one()
 
     @staticmethod
     async def close_session(db: AsyncSession, session_id: int, close_in: CashSessionClose, tenant_id: int) -> CashSession:
