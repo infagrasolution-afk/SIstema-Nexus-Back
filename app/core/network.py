@@ -12,3 +12,4 @@ def extract_client_ip(request: Request) -> str:
     if request.client and request.client.host:
         return str(request.client.host)[:64]
     return "127.0.0.1"
+

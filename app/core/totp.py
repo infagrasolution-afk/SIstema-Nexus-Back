@@ -49,3 +49,4 @@ def build_otpauth_uri(username: str, secret: str, issuer: str = "APEX ERP") -> s
     label = quote(f"{issuer}:{username}")
     issuer_q = quote(issuer)
     return f"otpauth://totp/{label}?secret={secret}&issuer={issuer_q}&algorithm=SHA1&digits=6&period=30"
+
