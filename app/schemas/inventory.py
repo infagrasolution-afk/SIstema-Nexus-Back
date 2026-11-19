@@ -88,18 +88,11 @@ class ProductResponse(ProductBase):
 
 class InitialStockImport(BaseModel):
     sku: str
-    name: str
-    description: Optional[str] = ""
-    cost: Decimal = Decimal('0.0000')
-    price: Decimal = Decimal('0.0000')
-    price_2: Optional[Decimal] = Decimal('0.0000')
-    price_3: Optional[Decimal] = Decimal('0.0000')
-    min_stock: Optional[Decimal] = Decimal('0.0000')
-    max_stock: Optional[Decimal] = Decimal('0.0000')
-    unit_of_measure: Optional[str] = "unid"
-    tax_exempt: Optional[bool] = False
     quantity: Decimal
     warehouse_id: int
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    name: Optional[str] = None
 
 # --- Warehouses ---
 class WarehouseProductMinStock(BaseModel):

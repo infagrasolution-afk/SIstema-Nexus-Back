@@ -472,56 +472,29 @@ async def import_initial_stock(
     
     imported_count = 0
     errors = []
-    rate_val = CurrencyService.get_bcv_rate()
-    rate = Decimal(str(rate_val)) if rate_val and rate_val > 0 else Decimal('1.0')
     
     for idx, item in enumerate(items_in):
-        if not item.sku or not item.name:
-            errors.append(f"Fila {idx+1}: SKU y Nombre son campos obligatorios.")
+        if not item.sku:
+            errors.append(f"Fila {idx+1}: El SKU es obligatorio.")
             continue
             
-        # 1. Find or Create Product
-        check_stmt = select(Product).where(Product.sku == item.sku, Product.tenant_id == tenant_id)
+        # 1. Require existing Product in Catalog (Standard ERP flow)
+        check_stmt = select(Product).where(Product.sku == item.sku.strip(), Product.tenant_id == tenant_id)
         res = await db.execute(check_stmt)
         product = res.scalars().first()
         
-        price_bs = Decimal(str(item.price)) * rate if item.price is not None else Decimal('0.0')
-        price_2_bs = Decimal(str(item.price_2)) * rate if getattr(item, 'price_2', None) is not None else Decimal('0.0')
-        price_3_bs = Decimal(str(item.price_3)) * rate if getattr(item, 'price_3', None) is not None else Decimal('0.0')
-        cost_bs = Decimal(str(item.cost)) * rate if item.cost is not None else Decimal('0.0')
-        
         if not product:
-            new_product = Product(
-                sku=item.sku,
-                name=item.name,
-                description=item.description or "",
-                price=price_bs,
-                price_2=price_2_bs,
-                price_3=price_3_bs,
-                cost=cost_bs,
-                average_cost=cost_bs,
-                min_stock=item.min_stock if item.min_stock is not None else Decimal('0.0'),
-                max_stock=item.max_stock if item.max_stock is not None else Decimal('0.0'),
-                unit_of_measure=item.unit_of_measure or "unid",
-                tax_exempt=bool(item.tax_exempt),
-                tenant_id=tenant_id
-            )
-            db.add(new_product)
-            await db.flush() # flush to get the ID
-            product = new_product
-        else:
-            # Optionally update cost/price if they want the cargo inicial to overwrite?
-            # We'll just leave existing products as they are, but use them for the movement.
-            pass
+            errors.append(f"Fila {idx+1}: El SKU '{item.sku}' no existe en el Catálogo de Productos. Créalo primero en Catálogo.")
+            continue
             
-        # 2. Inject Initial Stock
+        # 2. Inject Initial Stock into Warehouse
         if item.quantity > 0:
             charge = StockChargeCreate(
                 product_id=product.id,
                 warehouse_id=item.warehouse_id,
                 quantity=item.quantity,
-                reference=f"Cargo Inicial CSV - Fila {idx+1}",
-                notes="Importación masiva de saldo inicial"
+                reference=item.reference or f"Cargo Inicial - Fila {idx+1}",
+                notes=item.notes or "Importación masiva de saldo inicial"
             )
             await InventoryService.charge_stock(
                 db=db,
@@ -529,8 +502,7 @@ async def import_initial_stock(
                 tenant_id=tenant_id,
                 user_id=current_user.id
             )
-            
-        imported_count += 1
+            imported_count += 1
         
     await db.commit()
     return {"status": "success", "imported": imported_count, "errors": errors}
