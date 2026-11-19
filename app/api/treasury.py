@@ -67,20 +67,25 @@ async def create_ar_manual(
     _: bool = Depends(require_module("treasury")),
 ):
     """Crea una CxC manualmente (sin pasar por una venta)."""
+    due = ar_in.due_date.replace(tzinfo=None) if ar_in.due_date.tzinfo else ar_in.due_date
     ar = AccountsReceivable(
         sale_id=ar_in.sale_id,
         customer_id=ar_in.customer_id,
         total_amount=ar_in.total_amount,
         remaining_amount=ar_in.total_amount,
-        due_date=ar_in.due_date,
+        due_date=due,
         status=DebtStatus.OPEN,
         notes=ar_in.notes,
         tenant_id=tenant_id,
     )
     db.add(ar)
     await db.commit()
-    await db.refresh(ar)
-    return ar
+    res = await db.execute(
+        select(AccountsReceivable)
+        .where(AccountsReceivable.id == ar.id)
+        .options(selectinload(AccountsReceivable.customer), selectinload(AccountsReceivable.payments))
+    )
+    return res.scalars().first()
 
 
 @router.get("/ar/aging-report")
@@ -182,20 +187,25 @@ async def create_ap_manual(
     _: bool = Depends(require_module("treasury")),
 ):
     """Crea una CxP manualmente (sin pasar por una compra)."""
+    due = ap_in.due_date.replace(tzinfo=None) if ap_in.due_date.tzinfo else ap_in.due_date
     ap = AccountsPayable(
         purchase_id=ap_in.purchase_id,
         supplier_id=ap_in.supplier_id,
         total_amount=ap_in.total_amount,
         remaining_amount=ap_in.total_amount,
-        due_date=ap_in.due_date,
+        due_date=due,
         status=DebtStatus.OPEN,
         notes=ap_in.notes,
         tenant_id=tenant_id,
     )
     db.add(ap)
     await db.commit()
-    await db.refresh(ap)
-    return ap
+    res = await db.execute(
+        select(AccountsPayable)
+        .where(AccountsPayable.id == ap.id)
+        .options(selectinload(AccountsPayable.supplier), selectinload(AccountsPayable.payments))
+    )
+    return res.scalars().first()
 
 
 @router.get("/ap/aging-report")
