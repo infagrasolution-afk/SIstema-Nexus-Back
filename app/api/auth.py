@@ -38,22 +38,23 @@ SUPPORT_MESSAGE = (
 _ip_attempts: Dict[str, List[datetime]] = defaultdict(list)
 
 
-def _check_ip_rate_limit(client_ip: str) -> None:
+def _check_ip_rate_limit(client_ip: str, username: str = "") -> None:
     now = datetime.utcnow()
     window = timedelta(seconds=settings.LOGIN_RATE_WINDOW_SECONDS)
-    # Filtrar solo intentos dentro de la ventana de tiempo
-    attempts = [t for t in _ip_attempts[client_ip] if now - t < window]
-    _ip_attempts[client_ip] = attempts
+    key = f"{client_ip}:{username.strip().lower()}" if username else client_ip
+    # Filtrar solo intentos dentro de la ventana de tiempo por IP + usuario (permite múltiples usuarios en la misma IP de oficina)
+    attempts = [t for t in _ip_attempts[key] if now - t < window]
+    _ip_attempts[key] = attempts
 
     if len(attempts) >= settings.LOGIN_RATE_LIMIT:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=(
-                "Demasiados intentos de acceso desde esta conexión. "
+                "Demasiados intentos de acceso para este usuario desde esta conexión. "
                 "Por tu seguridad, espera unos minutos antes de volver a intentar."
             )
         )
-    _ip_attempts[client_ip].append(now)
+    _ip_attempts[key].append(now)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -68,11 +69,11 @@ async def login_access_token(
     request: Request,
     db: AsyncSession = Depends(get_master_db)
 ):
-    # Validar límite de intentos por dirección IP real (detrás de proxy Render/Cloudflare)
+    # Validar límite de intentos por dirección IP real + usuario (permite múltiples usuarios distintos en la misma IP)
     client_ip = extract_client_ip(request)
-    _check_ip_rate_limit(client_ip)
-
     username_clean = (login_data.username or "").strip()
+    _check_ip_rate_limit(client_ip, username_clean)
+
     result = await db.execute(select(User).where(User.username == username_clean))
     user = result.scalars().first()
 
