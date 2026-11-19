@@ -486,15 +486,24 @@ async def import_initial_stock(
         product = res.scalars().first()
         
         price_bs = Decimal(str(item.price)) * rate if item.price is not None else Decimal('0.0')
+        price_2_bs = Decimal(str(item.price_2)) * rate if getattr(item, 'price_2', None) is not None else Decimal('0.0')
+        price_3_bs = Decimal(str(item.price_3)) * rate if getattr(item, 'price_3', None) is not None else Decimal('0.0')
         cost_bs = Decimal(str(item.cost)) * rate if item.cost is not None else Decimal('0.0')
         
         if not product:
             new_product = Product(
                 sku=item.sku,
                 name=item.name,
+                description=item.description or "",
                 price=price_bs,
+                price_2=price_2_bs,
+                price_3=price_3_bs,
                 cost=cost_bs,
                 average_cost=cost_bs,
+                min_stock=item.min_stock if item.min_stock is not None else Decimal('0.0'),
+                max_stock=item.max_stock if item.max_stock is not None else Decimal('0.0'),
+                unit_of_measure=item.unit_of_measure or "unid",
+                tax_exempt=bool(item.tax_exempt),
                 tenant_id=tenant_id
             )
             db.add(new_product)
