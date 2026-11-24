@@ -4,7 +4,7 @@ from sqlalchemy import select, delete
 from typing import List
 
 from app.core.database import get_master_db
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_tenant
 from app.domain.user import User
 from app.domain.rbac import Role, Permission, RolePermission
 from app.schemas.rbac import RoleCreate, RoleUpdate, RoleResponse, PermissionResponse
@@ -109,24 +109,34 @@ async def get_permissions(
 # GET /roles/  — Listar roles del tenant
 # ─────────────────────────────────────────────────────────────────────────────
 
+async def _serialize_role(db: AsyncSession, role: Role) -> dict:
+    perms_result = await db.execute(
+        select(Permission)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
+        .where(RolePermission.role_id == role.id)
+    )
+    return {
+        "id": role.id,
+        "name": role.name,
+        "description": role.description,
+        "tenant_id": role.tenant_id,
+        "is_system_role": role.is_system_role,
+        "permissions": perms_result.scalars().all(),
+    }
+
+
 @router.get("/", response_model=List[RoleResponse])
 async def get_roles(
     db: AsyncSession = Depends(get_master_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
 ):
     """Lista los roles de la empresa actual."""
     result = await db.execute(
-        select(Role).where(Role.tenant_id == current_user.tenant_id)
+        select(Role).where(Role.tenant_id == tenant_id)
     )
     roles = result.scalars().all()
-    for role in roles:
-        perms_result = await db.execute(
-            select(Permission)
-            .join(RolePermission, RolePermission.permission_id == Permission.id)
-            .where(RolePermission.role_id == role.id)
-        )
-        role.permissions = perms_result.scalars().all()
-    return roles
+    return [await _serialize_role(db, role) for role in roles]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -137,7 +147,8 @@ async def get_roles(
 async def create_role(
     role_in: RoleCreate,
     db: AsyncSession = Depends(get_master_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
 ):
     """
     Crea un nuevo rol para la empresa con los permisos seleccionados.
@@ -148,7 +159,7 @@ async def create_role(
 
     # Verificar nombre único en el tenant
     existing = await db.execute(
-        select(Role).where(Role.name == role_in.name, Role.tenant_id == current_user.tenant_id)
+        select(Role).where(Role.name == role_in.name, Role.tenant_id == tenant_id)
     )
     if existing.scalars().first():
         raise HTTPException(status_code=400, detail=f"Ya existe un rol con el nombre '{role_in.name}'")
@@ -156,7 +167,7 @@ async def create_role(
     db_role = Role(
         name=role_in.name,
         description=role_in.description,
-        tenant_id=current_user.tenant_id,
+        tenant_id=tenant_id,
         created_by_id=current_user.id,
         created_by_name=current_user.username
     )
@@ -167,20 +178,12 @@ async def create_role(
         db.add(RolePermission(
             role_id=db_role.id,
             permission_id=perm_id,
-            tenant_id=current_user.tenant_id
+            tenant_id=tenant_id
         ))
 
     await db.commit()
     await db.refresh(db_role)
-
-    # Cargar permisos para la respuesta
-    perms_result = await db.execute(
-        select(Permission)
-        .join(RolePermission, RolePermission.permission_id == Permission.id)
-        .where(RolePermission.role_id == db_role.id)
-    )
-    db_role.permissions = perms_result.scalars().all()
-    return db_role
+    return await _serialize_role(db, db_role)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -192,11 +195,12 @@ async def update_role(
     role_id: int,
     role_in: RoleUpdate,
     db: AsyncSession = Depends(get_master_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
 ):
     """Actualiza el nombre, descripción y permisos de un rol."""
     result = await db.execute(
-        select(Role).where(Role.id == role_id, Role.tenant_id == current_user.tenant_id)
+        select(Role).where(Role.id == role_id, Role.tenant_id == tenant_id)
     )
     role = result.scalars().first()
     if not role:
@@ -216,19 +220,12 @@ async def update_role(
             db.add(RolePermission(
                 role_id=role.id,
                 permission_id=perm_id,
-                tenant_id=current_user.tenant_id
+                tenant_id=tenant_id
             ))
 
     await db.commit()
     await db.refresh(role)
-
-    perms_result = await db.execute(
-        select(Permission)
-        .join(RolePermission, RolePermission.permission_id == Permission.id)
-        .where(RolePermission.role_id == role.id)
-    )
-    role.permissions = perms_result.scalars().all()
-    return role
+    return await _serialize_role(db, role)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -238,7 +235,8 @@ async def update_role(
 @router.post("/seed-defaults")
 async def seed_default_roles(
     db: AsyncSession = Depends(get_master_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
 ):
     """
     Crea los roles predeterminados para la empresa si no existen:
@@ -312,7 +310,7 @@ async def seed_default_roles(
         exists = await db.execute(
             select(Role).where(
                 Role.name == role_def["name"],
-                Role.tenant_id == current_user.tenant_id
+                Role.tenant_id == tenant_id
             )
         )
         if exists.scalars().first():
@@ -321,7 +319,7 @@ async def seed_default_roles(
         new_role = Role(
             name=role_def["name"],
             description=role_def["description"],
-            tenant_id=current_user.tenant_id,
+            tenant_id=tenant_id,
             is_system_role=role_def.get("is_system_role", False),
             created_by_id=current_user.id,
             created_by_name=current_user.username,
@@ -335,7 +333,7 @@ async def seed_default_roles(
                 db.add(RolePermission(
                     role_id=new_role.id,
                     permission_id=pid,
-                    tenant_id=current_user.tenant_id
+                    tenant_id=tenant_id
                 ))
         created.append(role_def["name"])
 
@@ -354,11 +352,12 @@ async def seed_default_roles(
 async def delete_role(
     role_id: int,
     db: AsyncSession = Depends(get_master_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
 ):
     """Elimina un rol. No se pueden eliminar roles del sistema."""
     result = await db.execute(
-        select(Role).where(Role.id == role_id, Role.tenant_id == current_user.tenant_id)
+        select(Role).where(Role.id == role_id, Role.tenant_id == tenant_id)
     )
     role = result.scalars().first()
     if not role:
