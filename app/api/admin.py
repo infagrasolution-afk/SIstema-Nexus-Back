@@ -132,8 +132,29 @@ async def update_tenant_global(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
         
-    for field, value in tenant_in.model_dump(exclude_unset=True).items():
+    update_data = tenant_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
         setattr(tenant, field, value)
+
+    # Si se actualizaron los módulos contratados del cliente, sincronizar los permisos de su usuario admin
+    if "modules" in update_data and update_data["modules"] is not None:
+        raw_mods = update_data["modules"]
+        if isinstance(raw_mods, dict):
+            active_keys = [
+                k for k, v in raw_mods.items()
+                if (isinstance(v, dict) and v.get("is_active", True)) or v is True
+            ]
+        elif isinstance(raw_mods, list):
+            active_keys = [str(x) for x in raw_mods]
+        else:
+            active_keys = [x.strip() for x in str(raw_mods).split(",") if x.strip()]
+        mods_csv = ",".join(active_keys)
+
+        users_res = await db.execute(
+            select(User).where(User.tenant_id == tenant_id, User.role == "admin")
+        )
+        for u in users_res.scalars().all():
+            u.modules = mods_csv
         
     await db.commit()
     await db.refresh(tenant)
