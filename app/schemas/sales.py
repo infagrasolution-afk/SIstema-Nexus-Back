@@ -140,9 +140,16 @@ class CreditNoteItemBase(BaseModel):
 class CreditNoteItemCreate(CreditNoteItemBase):
     pass
 
-class CreditNoteItemResponse(CreditNoteItemBase):
+class CreditNoteItemResponse(BaseModel):
     id: int
     credit_note_id: int
+    product_id: int
+    quantity: Decimal
+    unit_price: Decimal
+    subtotal: Decimal
+    tax_rate: Optional[Decimal] = Decimal('16.0000')
+    tax_amount: Optional[Decimal] = Decimal('0.0000')
+    total: Optional[Decimal] = None
     model_config = ConfigDict(from_attributes=True)
 
 class CreditNoteCreate(BaseModel):
@@ -163,13 +170,14 @@ class CreditNoteResponse(BaseModel):
     id: int
     number: Optional[str] = None
     control_number: Optional[str] = None
-    sale_id: int
+    sale_id: Optional[int] = None
+    reference_invoice_id: Optional[int] = None
     customer_id: int
     reason: str
-    currency: str
-    exchange_rate: Decimal
+    currency: Optional[str] = "USD"
+    exchange_rate: Optional[Decimal] = Decimal('1.0000')
     subtotal: Decimal
-    tax_total: Decimal
+    tax_total: Optional[Decimal] = Decimal('0.0000')
     total: Decimal
     status: str
     notes: Optional[str] = None

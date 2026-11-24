@@ -126,6 +126,14 @@ class CreditNote(Base, TimestampMixin, TenantMixin, AuditMixin):
     reference_invoice = relationship("Sale")
     items = relationship("CreditNoteItem", back_populates="credit_note", cascade="all, delete-orphan")
 
+    @property
+    def sale_id(self):
+        return self.reference_invoice_id
+
+    @property
+    def tax_total(self):
+        return self.tax_amount
+
 class CreditNoteItem(Base, TimestampMixin, TenantMixin, AuditMixin):
     """Líneas de detalle de una Nota de Crédito."""
     __tablename__ = "credit_note_items"
