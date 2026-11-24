@@ -32,6 +32,7 @@ class TenantBase(BaseModel):
 class TenantUpdate(TenantBase):
     name: Optional[str] = None
     is_active: Optional[bool] = None
+    subscription_end: Optional[datetime] = None
 
 class TenantProfileUpdate(BaseModel):
     """Campos seguros que una empresa puede editar sobre sí misma (sin alterar módulos o licencias)."""

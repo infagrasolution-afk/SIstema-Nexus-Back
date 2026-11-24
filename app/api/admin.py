@@ -134,6 +134,8 @@ async def update_tenant_global(
         
     update_data = tenant_in.model_dump(exclude_unset=True)
     for field, value in update_data.items():
+        if field == "subscription_end" and value is not None and getattr(value, "tzinfo", None) is not None:
+            value = value.replace(tzinfo=None)
         setattr(tenant, field, value)
 
     # Si se actualizaron los módulos contratados del cliente, sincronizar los permisos de su usuario admin
