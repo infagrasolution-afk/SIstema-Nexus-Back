@@ -7,7 +7,8 @@ from app.core.database import Base
 from app.domain.base import TimestampMixin, TenantMixin, AuditMixin
 
 def utc_now():
-    return datetime.now(timezone.utc)
+    # PostgreSQL TIMESTAMP WITHOUT TIME ZONE (Column(DateTime)) requiere datetime naive UTC para asyncpg
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 class SessionStatus(str, enum.Enum):
     OPEN = "open"
