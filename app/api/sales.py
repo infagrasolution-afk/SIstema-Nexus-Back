@@ -615,18 +615,19 @@ async def create_credit_note(
 
         if note_in.restock_inventory and item.quantity > 0:
             try:
-                await WMSService.register_movement(
-                    db=db,
-                    product_id=item.product_id,
-                    warehouse_id=target_wh,
-                    movement_type=MovementType.IN,
-                    movement_subtype=MovementSubtype.ADJUSTMENT,
-                    quantity=item.quantity,
-                    reference=f"Reingreso por {generated_number} (Factura #{sale.id:06d})",
-                    tenant_id=tenant_id,
-                    user_id=current_user.id,
-                    user_name=current_user.username,
-                )
+                async with db.begin_nested():
+                    await WMSService.register_movement(
+                        db=db,
+                        product_id=item.product_id,
+                        warehouse_id=target_wh,
+                        movement_type=MovementType.IN,
+                        movement_subtype=MovementSubtype.ADJUSTMENT,
+                        quantity=item.quantity,
+                        reference=f"Reingreso por {generated_number} (Factura #{sale.id:06d})",
+                        tenant_id=tenant_id,
+                        user_id=current_user.id,
+                        user_name=current_user.username,
+                    )
             except Exception as e:
                 import logging
                 logging.getLogger("nexus.sales").error(
