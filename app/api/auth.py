@@ -58,9 +58,13 @@ def _check_ip_rate_limit(client_ip: str, username: str = "") -> None:
 
 
 @router.get("/me", response_model=UserResponse)
-async def read_user_me(current_user: User = Depends(get_current_user)):
-    """Retorna la información del usuario autenticado."""
-    return current_user
+async def read_user_me(
+    db: AsyncSession = Depends(get_master_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retorna la información del usuario autenticado junto con su rol y permisos."""
+    from app.api.users import _serialize_user
+    return await _serialize_user(db, current_user)
 
 
 @router.post("/login", response_model=Token)
