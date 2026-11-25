@@ -20,8 +20,8 @@ def _is_tenant_admin(current_user: User, tenant_id: int) -> bool:
     return current_user.tenant_id == tenant_id and bool(getattr(current_user, "is_tenant_admin", False))
 
 
-async def _load_user_role(db: AsyncSession, user: User) -> dict:
-    """Carga el rol y sus permisos para incluirlos en la respuesta."""
+async def _load_user_role(db: AsyncSession, user: User):
+    """Carga el rol y sus permisos como dict puro para evitar lazy-load async."""
     if not user.role_id:
         return None
     result = await db.execute(
@@ -30,14 +30,41 @@ async def _load_user_role(db: AsyncSession, user: User) -> dict:
     role = result.scalars().first()
     if not role:
         return None
-    # Cargar permisos del rol
     perms_result = await db.execute(
         select(Permission)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
         .where(RolePermission.role_id == role.id)
     )
-    role.permissions = perms_result.scalars().all()
-    return role
+    return {
+        "id": role.id,
+        "name": role.name,
+        "description": role.description,
+        "tenant_id": role.tenant_id,
+        "is_system_role": role.is_system_role,
+        "permissions": perms_result.scalars().all(),
+    }
+
+
+async def _serialize_user(db: AsyncSession, user: User) -> dict:
+    """Serializa un usuario con su rol sin mutar relaciones SQLAlchemy."""
+    role_data = await _load_user_role(db, user)
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "is_active": user.is_active,
+        "is_superuser": user.is_superuser,
+        "is_tenant_admin": user.is_tenant_admin,
+        "modules": user.modules,
+        "tenant_id": user.tenant_id,
+        "role_id": user.role_id,
+        "created_at": user.created_at,
+        "is_locked": user.is_locked,
+        "login_attempts": user.login_attempts,
+        "locked_at": user.locked_at,
+        "totp_enabled": getattr(user, "totp_enabled", False),
+        "role": role_data,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,11 +83,7 @@ async def get_users(
     result = await db.execute(select(User).where(User.tenant_id == tenant_id))
     users = result.scalars().all()
 
-    # Cargar el rol de cada usuario
-    for user in users:
-        user.role = await _load_user_role(db, user)
-
-    return users
+    return [await _serialize_user(db, user) for user in users]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -177,9 +200,7 @@ async def create_user(
     await db.commit()
     await db.refresh(new_user)
 
-    # Cargar el rol para la respuesta
-    new_user.role = await _load_user_role(db, new_user)
-    return new_user
+    return await _serialize_user(db, new_user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -258,8 +279,7 @@ async def update_user(
 
     await db.commit()
     await db.refresh(user)
-    user.role = await _load_user_role(db, user)
-    return user
+    return await _serialize_user(db, user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -300,8 +320,7 @@ async def unlock_user(
 
     await db.commit()
     await db.refresh(user)
-    user.role = await _load_user_role(db, user)
-    return user
+    return await _serialize_user(db, user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
