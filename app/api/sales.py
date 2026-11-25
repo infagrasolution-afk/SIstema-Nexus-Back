@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
