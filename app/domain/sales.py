@@ -105,34 +105,23 @@ class CreditNote(Base, TimestampMixin, TenantMixin, AuditMixin):
     """Nota de Crédito — documento fiscal que reduce la deuda de un cliente."""
     __tablename__ = "credit_notes"
     id = Column(Integer, primary_key=True, index=True)
-    number = Column(String, index=True, nullable=True)  # Correlativo: NC-0001
+    number = Column(String, index=True, nullable=False)  # Correlativo: NC-000001
+    control_number = Column(String, nullable=True)  # Número de control SENIAT
+    sale_id = Column(Integer, ForeignKey('sales.id'), nullable=False)
     customer_id = Column(Integer, ForeignKey('customers.id'), nullable=False)
-    reference_invoice_id = Column(Integer, ForeignKey('sales.id'), nullable=True)
+    reason = Column(Text, nullable=False)
+    currency = Column(String, default="USD")
+    exchange_rate = Column(Numeric(18, 4), default=1.0)
     # Montos
     subtotal = Column(Numeric(18, 4), nullable=False)
-    tax_amount = Column(Numeric(18, 4), default=0.0)
+    tax_total = Column(Numeric(18, 4), default=0.0)
     total = Column(Numeric(18, 4), nullable=False)
-    # Fiscal
-    fiscal_number = Column(String, nullable=True)  # Número fiscal de la NC
-    control_number = Column(String, nullable=True)  # Número de control SENIAT
-    # Detalle
-    reason = Column(Text, nullable=False)
-    status = Column(String, default="ACTIVE")  # ACTIVE, VOIDED
-    # Tipo de afectación
-    affects_inventory = Column(Boolean, default=True)  # Si los productos regresan al almacén
-    warehouse_id = Column(Integer, ForeignKey('warehouses.id'), nullable=True)
+    status = Column(String, default="APPROVED")
+    notes = Column(Text, nullable=True)
     
     customer = relationship("Customer")
-    reference_invoice = relationship("Sale")
+    sale = relationship("Sale")
     items = relationship("CreditNoteItem", back_populates="credit_note", cascade="all, delete-orphan")
-
-    @property
-    def sale_id(self):
-        return self.reference_invoice_id
-
-    @property
-    def tax_total(self):
-        return self.tax_amount
 
 class CreditNoteItem(Base, TimestampMixin, TenantMixin, AuditMixin):
     """Líneas de detalle de una Nota de Crédito."""
@@ -143,6 +132,9 @@ class CreditNoteItem(Base, TimestampMixin, TenantMixin, AuditMixin):
     quantity = Column(Numeric(18, 4), nullable=False)
     unit_price = Column(Numeric(18, 4), nullable=False)
     subtotal = Column(Numeric(18, 4), nullable=False)
+    tax_rate = Column(Numeric(18, 4), default=16.0)
+    tax_amount = Column(Numeric(18, 4), default=0.0)
+    total = Column(Numeric(18, 4), nullable=False)
     
     credit_note = relationship("CreditNote", back_populates="items")
     product = relationship("Product")

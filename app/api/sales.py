@@ -571,20 +571,21 @@ async def create_credit_note(
     total_cn = count_res.scalar() or 0
     generated_number = f"NC-{total_cn + 1:06d}"
 
-    # 3. Crear cabecera de Nota de Crédito (usando columnas reales de CreditNote)
+    # 3. Crear cabecera de Nota de Crédito (alineada con tabla credit_notes de PostgreSQL)
     target_wh = sale.warehouse_id or 1
     credit_note = CreditNote(
         number=generated_number,
         control_number=note_in.control_number,
-        reference_invoice_id=sale.id,
+        sale_id=sale.id,
         customer_id=note_in.customer_id,
         reason=note_in.reason,
+        currency=note_in.currency or sale.currency or "USD",
+        exchange_rate=note_in.exchange_rate or sale.exchange_rate or Decimal('1.0000'),
         subtotal=note_in.subtotal,
-        tax_amount=note_in.tax_total,
+        tax_total=note_in.tax_total,
         total=note_in.total,
         status="APPROVED",
-        affects_inventory=bool(note_in.restock_inventory),
-        warehouse_id=target_wh,
+        notes=note_in.notes,
         tenant_id=tenant_id,
         created_by_id=current_user.id,
         created_by_name=current_user.username
@@ -603,6 +604,9 @@ async def create_credit_note(
             quantity=item.quantity,
             unit_price=item.unit_price,
             subtotal=item.subtotal,
+            tax_rate=item.tax_rate if item.tax_rate is not None else Decimal('16.0000'),
+            tax_amount=item.tax_amount if item.tax_amount is not None else Decimal('0.0000'),
+            total=item.total,
             tenant_id=tenant_id
         )
         db.add(cn_item)
