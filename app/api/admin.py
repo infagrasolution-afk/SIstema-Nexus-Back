@@ -364,21 +364,35 @@ async def get_backup_status(admin: User = Depends(check_admin)):
 
 
 @router.post("/backup/run")
-async def run_manual_backup(admin: User = Depends(check_admin)):
-    """Ejecuta un respaldo completo inmediato suplantando el anterior."""
+async def run_manual_backup(
+    tenant_id: Optional[int] = None,
+    admin: User = Depends(check_admin),
+):
+    """Ejecuta un respaldo inmediato (global o de un cliente) suplantando el anterior."""
     import os
     from scripts.backup_db import backup_database
-    path = await backup_database(overwrite_latest=True)
+    path = await backup_database(tenant_filter=tenant_id, overwrite_latest=True)
     size_kb = round(os.path.getsize(path) / 1024, 2)
-    return {"status": "ok", "filename": "apex_backup_latest.json.gz", "size_kb": size_kb}
+    return {"status": "ok", "filename": os.path.basename(path), "size_kb": size_kb}
 
 
 @router.get("/backup/download")
-async def download_latest_backup(admin: User = Depends(check_admin)):
-    """Descarga el último respaldo completo .json.gz (si no existe en disco, lo genera al instante)."""
+async def download_latest_backup(
+    tenant_id: Optional[int] = None,
+    admin: User = Depends(check_admin),
+):
+    """Descarga el respaldo completo o el respaldo individual de un cliente específico."""
     import os
     from fastapi.responses import FileResponse
     from scripts.backup_db import BACKUP_DIR, backup_database
+
+    if tenant_id is not None:
+        path = await backup_database(tenant_filter=tenant_id, overwrite_latest=True)
+        return FileResponse(
+            path=path,
+            media_type="application/gzip",
+            filename=f"apex_backup_empresa_{tenant_id}.json.gz",
+        )
 
     latest_path = os.path.join(BACKUP_DIR, "apex_backup_latest.json.gz")
     if not os.path.exists(latest_path):

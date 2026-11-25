@@ -45,16 +45,18 @@ async def backup_database(tenant_filter: int = None, overwrite_latest: bool = Fa
     db_url = normalize_asyncpg_url(settings.DATABASE_URL)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if overwrite_latest and not tenant_filter:
+    if overwrite_latest and tenant_filter:
+        filename = f"apex_backup_tenant_{tenant_filter}_latest.json.gz"
+    elif overwrite_latest and not tenant_filter:
         filename = "apex_backup_latest.json.gz"
     else:
         filename = f"apex_backup_tenant_{tenant_filter}_{timestamp}.json.gz" if tenant_filter else f"apex_backup_full_{timestamp}.json.gz"
     output_path = os.path.join(BACKUP_DIR, filename)
 
     if overwrite_latest and not tenant_filter:
-        # Limpiar respaldos previos para que siempre suplante al anterior
+        # Limpiar respaldos previos globales para que siempre suplante al anterior
         for old_name in os.listdir(BACKUP_DIR):
-            if old_name.startswith("apex_backup_") and old_name.endswith(".json.gz") and old_name != filename:
+            if old_name.startswith("apex_backup_full_") and old_name.endswith(".json.gz"):
                 try:
                     os.remove(os.path.join(BACKUP_DIR, old_name))
                 except OSError:
