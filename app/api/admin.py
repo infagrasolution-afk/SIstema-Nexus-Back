@@ -336,3 +336,58 @@ async def get_global_security_audit_logs(
     ]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Respaldos Automáticos y Manuales de Base de Datos (Solo Súper Admin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/backup/status")
+async def get_backup_status(admin: User = Depends(check_admin)):
+    """Informa si existe el respaldo vigente (apex_backup_latest.json.gz), su tamaño y fecha."""
+    import os
+    from datetime import datetime, timezone, timedelta
+    from scripts.backup_db import BACKUP_DIR
+
+    latest_path = os.path.join(BACKUP_DIR, "apex_backup_latest.json.gz")
+    if not os.path.exists(latest_path):
+        return {"exists": False, "schedule_vet": ["08:00", "13:00", "19:00"]}
+
+    stat = os.stat(latest_path)
+    vet_tz = timezone(timedelta(hours=-4))
+    updated_at = datetime.fromtimestamp(stat.st_mtime, tz=vet_tz).isoformat()
+    return {
+        "exists": True,
+        "filename": "apex_backup_latest.json.gz",
+        "size_kb": round(stat.st_size / 1024, 2),
+        "updated_at": updated_at,
+        "schedule_vet": ["08:00", "13:00", "19:00"],
+    }
+
+
+@router.post("/backup/run")
+async def run_manual_backup(admin: User = Depends(check_admin)):
+    """Ejecuta un respaldo completo inmediato suplantando el anterior."""
+    import os
+    from scripts.backup_db import backup_database
+    path = await backup_database(overwrite_latest=True)
+    size_kb = round(os.path.getsize(path) / 1024, 2)
+    return {"status": "ok", "filename": "apex_backup_latest.json.gz", "size_kb": size_kb}
+
+
+@router.get("/backup/download")
+async def download_latest_backup(admin: User = Depends(check_admin)):
+    """Descarga el último respaldo completo .json.gz (si no existe en disco, lo genera al instante)."""
+    import os
+    from fastapi.responses import FileResponse
+    from scripts.backup_db import BACKUP_DIR, backup_database
+
+    latest_path = os.path.join(BACKUP_DIR, "apex_backup_latest.json.gz")
+    if not os.path.exists(latest_path):
+        latest_path = await backup_database(overwrite_latest=True)
+    return FileResponse(
+        path=latest_path,
+        media_type="application/gzip",
+        filename="apex_backup_latest.json.gz",
+    )
+
+
+

@@ -1,0 +1,39 @@
+name: Respaldo Automático BD Neon (8am, 1pm, 7pm VET)
+
+on:
+  schedule:
+    # 08:00 AM, 01:00 PM y 07:00 PM hora Venezuela (UTC-4) => 12:00, 17:00, 23:00 UTC
+    - cron: '0 12,17,23 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup-neon:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias mínimas de respaldo
+        run: |
+          pip install asyncpg pydantic-settings python-dotenv
+
+      - name: Ejecutar respaldo completo (suplanta el anterior)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY || 'github-actions-backup-placeholder-secret-key-32chars' }}
+        run: |
+          python scripts/backup_db.py --all --latest
+
+      - name: Guardar respaldo único vigente
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex_backup_latest
+          path: backups/apex_backup_latest.json.gz
+          retention-days: 2
+          overwrite: true
+

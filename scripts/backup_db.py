@@ -40,13 +40,25 @@ def normalize_asyncpg_url(url: str) -> str:
     return clean
 
 
-async def backup_database(tenant_filter: int = None):
+async def backup_database(tenant_filter: int = None, overwrite_latest: bool = False):
     os.makedirs(BACKUP_DIR, exist_ok=True)
     db_url = normalize_asyncpg_url(settings.DATABASE_URL)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"apex_backup_tenant_{tenant_filter}_{timestamp}.json.gz" if tenant_filter else f"apex_backup_full_{timestamp}.json.gz"
+    if overwrite_latest and not tenant_filter:
+        filename = "apex_backup_latest.json.gz"
+    else:
+        filename = f"apex_backup_tenant_{tenant_filter}_{timestamp}.json.gz" if tenant_filter else f"apex_backup_full_{timestamp}.json.gz"
     output_path = os.path.join(BACKUP_DIR, filename)
+
+    if overwrite_latest and not tenant_filter:
+        # Limpiar respaldos previos para que siempre suplante al anterior
+        for old_name in os.listdir(BACKUP_DIR):
+            if old_name.startswith("apex_backup_") and old_name.endswith(".json.gz") and old_name != filename:
+                try:
+                    os.remove(os.path.join(BACKUP_DIR, old_name))
+                except OSError:
+                    pass
 
     print(f"[*] Iniciando respaldo de APEX ERP...")
     print(f"[*] Destino: {output_path}")
@@ -121,6 +133,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Respaldo de base de datos APEX ERP")
     parser.add_argument("--all", action="store_true", help="Respaldar todas las tablas y esquemas")
     parser.add_argument("--tenant", type=int, default=None, help="ID específico del tenant a respaldar")
+    parser.add_argument("--latest", action="store_true", help="Sobrescribir siempre apex_backup_latest.json.gz")
     args = parser.parse_args()
 
-    asyncio.run(backup_database(tenant_filter=args.tenant))
+    asyncio.run(backup_database(tenant_filter=args.tenant, overwrite_latest=args.latest))

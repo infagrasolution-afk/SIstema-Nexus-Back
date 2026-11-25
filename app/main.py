@@ -36,8 +36,23 @@ async def lifespan(app: FastAPI):
         logger.info("Sincronización de esquemas completada exitosamente al iniciar.")
     except Exception as e:
         logger.error(f"Error durante la sincronización inicial de base de datos: {e}")
+
+    backup_task = None
+    try:
+        from app.services.backup_scheduler import start_backup_scheduler
+        backup_task = start_backup_scheduler()
+        logger.info("Planificador automático de respaldos (8am, 1pm, 7pm VET) iniciado.")
+    except Exception as e:
+        logger.warning(f"No se pudo iniciar el planificador de respaldos: {e}")
+
     yield
-    # Shutdown: liberar conexiones de engines
+    # Shutdown: detener planificador y liberar conexiones de engines
+    if backup_task:
+        backup_task.cancel()
+        try:
+            await backup_task
+        except Exception:
+            pass
     try:
         await dispose_all_engines()
         logger.info("Conexiones de base de datos liberadas correctamente al apagar el servidor.")
