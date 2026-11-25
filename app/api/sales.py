@@ -464,7 +464,8 @@ async def create_commercial_note(
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(require_module("sales"))
+    _: bool = Depends(require_module("sales")),
+    _perm: User = Depends(require_permissions(["sales:void"])),
 ):
     # Ensure customer belongs to tenant
     cust_check = await db.execute(
@@ -551,7 +552,8 @@ async def create_credit_note(
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(require_module("sales"))
+    _: bool = Depends(require_module("sales")),
+    _perm: User = Depends(require_permissions(["sales:void"])),
 ):
     """
     Crea una Nota de Crédito fiscal formal vinculada a una Factura de Venta.
