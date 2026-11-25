@@ -68,43 +68,44 @@ class WMSService:
 
         await db.flush()
 
-        # 3. Log to SystemMovement
+        # 3. Log to SystemMovement (using savepoint so logging failures never abort the transaction)
         try:
-            # Fetch product and warehouse names for denormalization
-            prod_result = await db.execute(select(Product).where(Product.id == product_id))
-            product = prod_result.scalars().first()
-            wh_result = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
-            warehouse = wh_result.scalars().first()
+            async with db.begin_nested():
+                # Fetch product and warehouse names for denormalization
+                prod_result = await db.execute(select(Product).where(Product.id == product_id))
+                product = prod_result.scalars().first()
+                wh_result = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
+                warehouse = wh_result.scalars().first()
 
-            # Map movement_subtype/type to operation label
-            operation_map = {
-                "CHARGE":      "CHARGE",
-                "DISCHARGE":   "DISCHARGE",
-                "ADJUSTMENT":  "ADJUSTMENT",
-                "TRANSFER":    "TRANSFER",
-                "DISPATCH":    "DISPATCH",
-                "SALE":        "SALE",
-                "PURCHASE":    "PURCHASE",
-            }
-            operation = operation_map.get(movement_subtype, "ADJUSTMENT")
+                # Map movement_subtype/type to operation label
+                operation_map = {
+                    "CHARGE":      "CHARGE",
+                    "DISCHARGE":   "DISCHARGE",
+                    "ADJUSTMENT":  "ADJUSTMENT",
+                    "TRANSFER":    "TRANSFER",
+                    "DISPATCH":    "DISPATCH",
+                    "SALE":        "SALE",
+                    "PURCHASE":    "PURCHASE",
+                }
+                operation = operation_map.get(movement_subtype, "ADJUSTMENT")
 
-            await MovementLogger.log_stock_movement(
-                db=db,
-                tenant_id=tenant_id,
-                operation=operation,
-                product_id=product_id,
-                product_name=product.name if product else f"Producto #{product_id}",
-                product_sku=product.sku if product else "",
-                warehouse_id=warehouse_id,
-                warehouse_name=warehouse.name if warehouse else f"Almacén #{warehouse_id}",
-                quantity=abs(quantity),
-                unit=product.unit_of_measure if product else "unidades",
-                reference_id=movement.id,
-                reference_code=reference or document_number,
-                user_id=user_id,
-                user_name=user_name,
-                notes=notes,
-            )
+                await MovementLogger.log_stock_movement(
+                    db=db,
+                    tenant_id=tenant_id,
+                    operation=operation,
+                    product_id=product_id,
+                    product_name=product.name if product else f"Producto #{product_id}",
+                    product_sku=product.sku if product else "",
+                    warehouse_id=warehouse_id,
+                    warehouse_name=warehouse.name if warehouse else f"Almacén #{warehouse_id}",
+                    quantity=abs(quantity),
+                    unit=product.unit_of_measure if product else "unidades",
+                    reference_id=movement.id,
+                    reference_code=reference or document_number,
+                    user_id=user_id,
+                    user_name=user_name,
+                    notes=notes,
+                )
         except Exception:
             # Never block the main operation due to logging failures
             pass

@@ -567,95 +567,104 @@ async def create_credit_note(
     if not sale:
         raise HTTPException(status_code=404, detail="Factura de venta original no encontrada")
 
-    # 2. Generar número correlativo de Nota de Crédito
-    count_stmt = select(func.count(CreditNote.id)).where(CreditNote.tenant_id == tenant_id)
-    count_res = await db.execute(count_stmt)
-    total_cn = count_res.scalar() or 0
-    generated_number = f"NC-{total_cn + 1:06d}"
+    try:
+        # 2. Generar número correlativo de Nota de Crédito
+        count_stmt = select(func.count(CreditNote.id)).where(CreditNote.tenant_id == tenant_id)
+        count_res = await db.execute(count_stmt)
+        total_cn = count_res.scalar() or 0
+        generated_number = f"NC-{total_cn + 1:06d}"
 
-    # 3. Crear cabecera de Nota de Crédito (alineada con tabla credit_notes de PostgreSQL)
-    target_wh = sale.warehouse_id or 1
-    credit_note = CreditNote(
-        number=generated_number,
-        control_number=note_in.control_number,
-        sale_id=sale.id,
-        customer_id=note_in.customer_id,
-        reason=note_in.reason,
-        currency=note_in.currency or sale.currency or "USD",
-        exchange_rate=note_in.exchange_rate or sale.exchange_rate or Decimal('1.0000'),
-        subtotal=note_in.subtotal,
-        tax_total=note_in.tax_total,
-        total=note_in.total,
-        status="APPROVED",
-        notes=note_in.notes,
-        tenant_id=tenant_id,
-        created_by_id=current_user.id,
-        created_by_name=current_user.username
-    )
-    db.add(credit_note)
-    await db.flush()  # Para obtener el ID
-
-    # 4. Crear los ítems de la nota de crédito y reingresar stock si corresponde
-    from app.services.wms_service import WMSService
-    from app.domain.inventory import MovementType, MovementSubtype
-
-    for item in note_in.items:
-        cn_item = CreditNoteItem(
-            credit_note_id=credit_note.id,
-            product_id=item.product_id,
-            quantity=item.quantity,
-            unit_price=item.unit_price,
-            subtotal=item.subtotal,
-            tax_rate=item.tax_rate if item.tax_rate is not None else Decimal('16.0000'),
-            tax_amount=item.tax_amount if item.tax_amount is not None else Decimal('0.0000'),
-            total=item.total,
-            tenant_id=tenant_id
+        # 3. Crear cabecera de Nota de Crédito (alineada con tabla credit_notes de PostgreSQL)
+        target_wh = sale.warehouse_id or 1
+        credit_note = CreditNote(
+            number=generated_number,
+            control_number=note_in.control_number,
+            sale_id=sale.id,
+            customer_id=note_in.customer_id,
+            reason=note_in.reason,
+            currency=note_in.currency or sale.currency or "USD",
+            exchange_rate=note_in.exchange_rate or sale.exchange_rate or Decimal('1.0000'),
+            subtotal=note_in.subtotal,
+            tax_total=note_in.tax_total,
+            total=note_in.total,
+            status="APPROVED",
+            notes=note_in.notes,
+            tenant_id=tenant_id,
+            created_by_id=current_user.id,
+            created_by_name=current_user.username
         )
-        db.add(cn_item)
+        db.add(credit_note)
+        await db.flush()  # Para obtener el ID
 
-        if note_in.restock_inventory and item.quantity > 0:
-            try:
-                async with db.begin_nested():
-                    await WMSService.register_movement(
-                        db=db,
-                        product_id=item.product_id,
-                        warehouse_id=target_wh,
-                        movement_type=MovementType.IN,
-                        movement_subtype=MovementSubtype.ADJUSTMENT,
-                        quantity=item.quantity,
-                        reference=f"Reingreso por {generated_number} (Factura #{sale.id:06d})",
-                        tenant_id=tenant_id,
-                        user_id=current_user.id,
-                        user_name=current_user.username,
+        # 4. Crear los ítems de la nota de crédito y reingresar stock si corresponde
+        from app.services.wms_service import WMSService
+        from app.domain.inventory import MovementType, MovementSubtype
+
+        for item in note_in.items:
+            cn_item = CreditNoteItem(
+                credit_note_id=credit_note.id,
+                product_id=item.product_id,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                subtotal=item.subtotal,
+                tax_rate=item.tax_rate if item.tax_rate is not None else Decimal('16.0000'),
+                tax_amount=item.tax_amount if item.tax_amount is not None else Decimal('0.0000'),
+                total=item.total,
+                tenant_id=tenant_id
+            )
+            db.add(cn_item)
+
+            if note_in.restock_inventory and item.quantity > 0:
+                try:
+                    async with db.begin_nested():
+                        await WMSService.register_movement(
+                            db=db,
+                            product_id=item.product_id,
+                            warehouse_id=target_wh,
+                            movement_type=MovementType.IN,
+                            movement_subtype=MovementSubtype.ADJUSTMENT,
+                            quantity=item.quantity,
+                            reference=f"Reingreso por {generated_number} (Factura #{sale.id:06d})",
+                            tenant_id=tenant_id,
+                            user_id=current_user.id,
+                            user_name=current_user.username,
+                        )
+                except Exception as e:
+                    import logging
+                    logging.getLogger("nexus.sales").error(
+                        f"Error reingresando stock para ítem {item.product_id} en NC {generated_number}: {e}"
                     )
-            except Exception as e:
-                import logging
-                logging.getLogger("nexus.sales").error(
-                    f"Error reingresando stock para ítem {item.product_id} en NC {generated_number}: {e}"
-                )
 
-    # 5. Descontar saldo en Cuentas por Cobrar (CxC) si existe registro
-    from app.domain.treasury import AccountsReceivable, DebtStatus
-    ar_stmt = select(AccountsReceivable).where(
-        AccountsReceivable.sale_id == sale.id,
-        AccountsReceivable.tenant_id == tenant_id
-    )
-    ar_res = await db.execute(ar_stmt)
-    ar_record = ar_res.scalars().first()
-    if ar_record:
-        ar_record.remaining_amount -= note_in.total
-        if ar_record.remaining_amount <= 0:
-            ar_record.remaining_amount = Decimal('0.0000')
-            ar_record.status = DebtStatus.PAID
-        elif ar_record.remaining_amount < ar_record.total_amount:
-            ar_record.status = DebtStatus.PARTIAL
+        # 5. Descontar saldo en Cuentas por Cobrar (CxC) si existe registro
+        from app.domain.treasury import AccountsReceivable, DebtStatus
+        ar_stmt = select(AccountsReceivable).where(
+            AccountsReceivable.sale_id == sale.id,
+            AccountsReceivable.tenant_id == tenant_id
+        )
+        ar_res = await db.execute(ar_stmt)
+        ar_record = ar_res.scalars().first()
+        if ar_record:
+            ar_record.remaining_amount -= note_in.total
+            if ar_record.remaining_amount <= 0:
+                ar_record.remaining_amount = Decimal('0.0000')
+                ar_record.status = DebtStatus.PAID
+            elif ar_record.remaining_amount < ar_record.total_amount:
+                ar_record.status = DebtStatus.PARTIAL
 
-    await db.commit()
-    
-    # Recargar con items
-    full_stmt = select(CreditNote).where(CreditNote.id == credit_note.id).options(selectinload(CreditNote.items))
-    final_res = await db.execute(full_stmt)
-    return final_res.scalars().first()
+        await db.commit()
+        
+        # Recargar con items
+        full_stmt = select(CreditNote).where(CreditNote.id == credit_note.id).options(selectinload(CreditNote.items))
+        final_res = await db.execute(full_stmt)
+        return final_res.scalars().first()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo emitir la Nota de Crédito ({type(exc).__name__}): {str(exc)[:220]}"
+        )
 
 
 @router.get("/credit-notes", response_model=List[CreditNoteResponse])
