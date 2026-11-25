@@ -483,6 +483,7 @@ async def create_commercial_note(
     new_note = DebitNote(
         **note_in.model_dump(),
         number=new_number,
+        tenant_id=tenant_id,
         created_by_id=current_user.id,
         created_by_name=current_user.username
     )
@@ -492,6 +493,7 @@ async def create_commercial_note(
     # --- AUTOMATIZACION CxC ---
     # Si la nota afecta una factura específica, actualizar su saldo
     if note_in.reference_invoice_id:
+        from app.domain.treasury import DebtStatus
         ar_stmt = select(AccountsReceivable).where(
             AccountsReceivable.sale_id == note_in.reference_invoice_id,
             AccountsReceivable.tenant_id == tenant_id
@@ -504,16 +506,16 @@ async def create_commercial_note(
                 # Incrementa la deuda
                 ar_record.remaining_amount += note_in.amount
                 ar_record.total_amount += note_in.amount
-                if ar_record.status == 'PAID':
-                    ar_record.status = 'PARTIAL'
+                if ar_record.status == DebtStatus.PAID:
+                    ar_record.status = DebtStatus.PARTIAL
             elif note_in.type == 'Crédito':
                 # Disminuye la deuda
                 ar_record.remaining_amount -= note_in.amount
                 if ar_record.remaining_amount <= 0:
-                    ar_record.remaining_amount = 0
-                    ar_record.status = 'PAID'
+                    ar_record.remaining_amount = Decimal('0.0000')
+                    ar_record.status = DebtStatus.PAID
                 elif ar_record.remaining_amount < ar_record.total_amount:
-                    ar_record.status = 'PARTIAL'
+                    ar_record.status = DebtStatus.PARTIAL
 
     await db.commit()
     await db.refresh(new_note)
